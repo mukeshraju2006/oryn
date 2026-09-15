@@ -364,7 +364,6 @@ class VSCodeAdapter:
             walk(root)
 
             layout = {
-
                 "groups": groups,
 
                 "active_group": (
@@ -1000,10 +999,28 @@ class VSCodeAdapter:
             ).resolve()
         )
 
+        # CHANGED:
+        # Validate that destination is a valid directory path
+        if not destination.is_absolute():
+            print(
+                f"Destination workspace path must be absolute: "
+                f"{destination_workspace}"
+            )
+            return False
+
         destination.mkdir(
             parents=True,
             exist_ok=True,
         )
+
+        # CHANGED:
+        # Double-check that destination directory was created successfully
+        if not destination.is_dir():
+            print(
+                f"Failed to create destination workspace directory: "
+                f"{destination_workspace}"
+            )
+            return False
 
         directories = project.get(
             "directories",
@@ -1018,11 +1035,24 @@ class VSCodeAdapter:
             )
 
             try:
-
                 target.mkdir(
                     parents=True,
                     exist_ok=True,
                 )
+
+                # CHANGED:
+                # Validate that created directory is within destination
+                if not self._is_path_within_directory(target, destination):
+                    print(
+                        f"Skipping unsafe project directory (path traversal): "
+                        f"{relative_path}"
+                    )
+                    # Remove the incorrectly created directory
+                    try:
+                        target.rmdir()
+                    except OSError:
+                        pass  # Ignore errors during cleanup
+                    continue
 
             except OSError as error:
 
@@ -1084,6 +1114,15 @@ class VSCodeAdapter:
                     exist_ok=True,
                 )
 
+                # CHANGED:
+                # Validate that target file is within destination
+                if not self._is_path_within_directory(target, destination):
+                    print(
+                        f"Skipping unsafe project file (path traversal): "
+                        f"{relative_path}"
+                    )
+                    continue
+
                 raw_data = (
                     base64.b64decode(
                         encoded_data
@@ -1107,6 +1146,31 @@ class VSCodeAdapter:
                 return False
 
         return True
+
+    # CHANGED:
+    # Helper method to check if a path is within a directory
+    def _is_path_within_directory(self, path, directory):
+        """
+        Check if a path is within a directory, resolving symlinks and
+        preventing path traversal attacks.
+
+        Args:
+            path: Path to check
+            directory: Directory that should contain the path
+
+        Returns:
+            bool: True if path is within directory, False otherwise
+        """
+        try:
+            # Resolve both paths to eliminate symlinks and normalize
+            resolved_path = path.resolve()
+            resolved_directory = directory.resolve()
+
+            # Check if the resolved path starts with the resolved directory
+            return resolved_path.is_relative_to(resolved_directory)
+        except (ValueError, OSError):
+            # If resolution fails, consider it unsafe
+            return False
 
     # CHANGED:
     # Recursively replace paths inside VS Code's
