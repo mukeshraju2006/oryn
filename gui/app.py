@@ -558,10 +558,10 @@ class OrynGUI:
     def logout(self):
         # Clear the token
         self.token = None
-        # Remove the saved token file
-        from oryn.cloud.session import TOKEN_FILE
-        if os.path.exists(TOKEN_FILE):
-            os.remove(TOKEN_FILE)
+        # Remove the saved token file using existing session mechanism
+        from oryn.cloud.session import SESSION_FILE
+        if SESSION_FILE.exists():
+            SESSION_FILE.unlink()
         # Clear the client
         self.client = None
         # Clear workspace and snapshot data
@@ -569,6 +569,9 @@ class OrynGUI:
         self.workspace_display_to_id.clear()
         self.snapshots = []
         self.snapshot_display_to_id.clear()
+        # Clear combobox selections
+        self.workspace_combo.set('')
+        self.snapshot_combo.set('')
         # Switch to login screen
         self.notebook.select(0)
         self.log_status("Logged out successfully.")
