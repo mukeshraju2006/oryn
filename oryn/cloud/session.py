@@ -1,13 +1,32 @@
 import json
+import os
+import sys
 from pathlib import Path
 
 
-SESSION_FILE = (
-    Path.home()
-    / ".config"
-    / "oryn"
-    / "session.json"
-)
+# CHANGED: Keep the Linux location while using Windows per-user app data.
+def get_session_file(
+    platform_name=None,
+    environ=None,
+    home_path=None,
+):
+    platform_name = platform_name or sys.platform
+    environ = os.environ if environ is None else environ
+    home_path = Path.home() if home_path is None else Path(home_path)
+
+    if platform_name.startswith("win"):
+        appdata = environ.get("APPDATA")
+        base_path = (
+            Path(appdata)
+            if appdata
+            else home_path / "AppData" / "Roaming"
+        )
+        return base_path / "oryn" / "session.json"
+
+    return home_path / ".config" / "oryn" / "session.json"
+
+
+SESSION_FILE = get_session_file()
 
 
 def save_token(token):

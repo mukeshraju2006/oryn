@@ -4,14 +4,26 @@ import tempfile
 import shutil
 import os
 import sqlite3
+import sys
 from pathlib import Path
 
 from oryn.cloud.client import CloudClient
 from oryn.cloud.session import load_token
-from oryn.applications.vscode.adapter import VSCodeAdapter
+from oryn.applications.vscode.adapter import VSCodeAdapter, VSCodePlatform
 
 
 BASE_URL = "http://127.0.0.1:8000"
+
+
+def portable_project_path(adapter, value):
+    parts = adapter._portable_relative_parts(value)
+
+    if parts is None:
+        raise RuntimeError(
+            f"Snapshot project path is not portable: {value}"
+        )
+
+    return Path(*parts)
 
 
 def get_client():
@@ -240,10 +252,13 @@ def test_missing_project_restore(client):
         )
     )
 
-    source_workspace = Path(
+    adapter = VSCodeAdapter()
+    source_workspace = adapter._snapshot_path(
         snapshot_data["workspace"]["path"]
-        .replace("file://", "")
     )
+
+    if source_workspace is None:
+        raise RuntimeError("Snapshot does not contain a valid workspace path.")
 
     destination = (
         temp_root
@@ -263,8 +278,6 @@ def test_missing_project_restore(client):
 
         print("\nDestination project:")
         print("  MISSING")
-
-        adapter = VSCodeAdapter()
 
         print(
             "\nRecreating project from cloud snapshot..."
@@ -306,22 +319,10 @@ def test_missing_project_restore(client):
         # Verify every file byte-for-byte against the Base64
         # data stored in the cloud snapshot.
         for file_data in expected_files:
-            snapshot_path = Path(
-                file_data["path"]
+            relative_path = portable_project_path(
+                adapter,
+                file_data["path"],
             )
-
-            if snapshot_path.is_absolute():
-                try:
-                    relative_path = snapshot_path.relative_to(
-                        source_workspace
-                    )
-                except ValueError:
-                    raise RuntimeError(
-                        f"Snapshot file is outside workspace: "
-                        f"{file_data['path']}"
-                    )
-            else:
-                relative_path = snapshot_path
 
             restored_path = (
                 destination
@@ -365,22 +366,10 @@ def test_missing_project_restore(client):
         verified_directories = 0
 
         for directory in expected_directories:
-            snapshot_directory = Path(directory)
-
-            if snapshot_directory.is_absolute():
-                try:
-                    relative_directory = (
-                        snapshot_directory.relative_to(
-                            source_workspace
-                        )
-                    )
-                except ValueError:
-                    raise RuntimeError(
-                        f"Snapshot directory is outside workspace: "
-                        f"{directory}"
-                    )
-            else:
-                relative_directory = snapshot_directory
+            relative_directory = portable_project_path(
+                adapter,
+                directory,
+            )
 
             restored_directory = (
                 destination
@@ -430,273 +419,83 @@ def test_full_cross_device_restore(client):
     # Retrieve the latest cloud snapshot
     snapshot_data = test_latest_snapshot(client)
 
-    # Create a temporary directory to act as the new home
     with tempfile.TemporaryDirectory(prefix="oryn-test-home-") as temp_home_str:
         temp_home = Path(temp_home_str)
-        # Set the HOME environment variable to the temporary home
-        old_home = os.environ.get("HOME")
-        os.environ["HOME"] = str(temp_home)
+        platform = VSCodePlatform(
+            platform_name=sys.platform,
+            environ={"APPDATA": str(temp_home / "AppData" / "Roaming")},
+            home_path=temp_home,
+        )
+        adapter = VSCodeAdapter(platform)
+        source_workspace = adapter._snapshot_path(
+            snapshot_data["workspace"]["path"]
+        )
 
-        try:
-            # Initialize the adapter
-            adapter = VSCodeAdapter()
+        if source_workspace is None:
+            raise RuntimeError("Snapshot does not contain a valid workspace path")
 
-            # Extract source workspace path from snapshot
-            source_workspace_str = snapshot_data["workspace"]["path"]
-            if source_workspace_str.startswith("file://"):
-                source_workspace_str = source_workspace_str[7:]
-            source_workspace = Path(source_workspace_str)
+        destination_value = adapter.map_workspace_path(
+            str(source_workspace),
+            str(temp_home),
+        )
+        if destination_value is None:
+            raise RuntimeError("Failed to map source workspace to simulated home")
 
-            # Map source workspace to current home (which is now the temporary home)
-            destination_workspace = adapter.map_workspace_to_current_home(
-                str(source_workspace)
-            )
-            if destination_workspace is None:
-                raise RuntimeError(
-                    "Failed to map source workspace to current home"
-                )
-            destination_workspace = Path(destination_workspace)
+        destination_workspace = Path(destination_value)
+        project = snapshot_data.get("project")
 
-            print(f"Source workspace: {source_workspace}")
-            print(f"Destination workspace: {destination_workspace}")
+        if not project:
+            raise RuntimeError("Snapshot does not contain project data")
 
-            # Ensure the destination project does not exist
-            if destination_workspace.exists():
-                raise RuntimeError(
-                    f"Destination workspace already exists: {destination_workspace}"
-                )
+        if not adapter.restore_project(project, destination_workspace):
+            raise RuntimeError("Failed to restore project")
 
-            # Step 1: Restore the project if missing (using the adapter's method)
-            project = snapshot_data.get("project")
-            if not project:
-                raise RuntimeError(
-                    "Snapshot does not contain project data"
-                )
+        workspace_storage = platform.workspace_storage_path() / "test-workspace"
+        workspace_storage.mkdir(parents=True, exist_ok=True)
+        state_db = workspace_storage / "state.vscdb"
 
-            print("\nRestoring project from cloud snapshot...")
-            if not adapter.restore_project(project, str(destination_workspace)):
-                raise RuntimeError("Failed to restore project")
-
-            # Verify the project was restored
-            if not destination_workspace.exists():
-                raise RuntimeError(
-                    "Project was not restored to destination workspace"
-                )
-
-            # Step 2: Prepare the VS Code workspace storage manually
-            # We simulate what prepare_destination_workspace would do:
-            #   - Launch VS Code to create workspace storage
-            #   - Find the workspace storage by path
-            # Since we don't want to launch VS Code, we'll create the storage directly.
-
-            # The workspace storage is located at:
-            #   ~/.config/Code/User/workspaceStorage/
-            # Each workspace gets a subdirectory (hash of workspace path)
-            # We'll create a deterministic subdirectory for testing.
-
-            # Create the base directories
-            code_config = temp_home / ".config" / "Code" / "User"
-            workspace_storage_base = code_config / "workspaceStorage"
-            workspace_storage_base.mkdir(parents=True, exist_ok=True)
-
-            # Create a subdirectory for our workspace (using a fixed hash for simplicity)
-            # In reality, VS Code uses a hash of the workspace path.
-            # We'll use a simple hash: the workspace path string length.
-            workspace_hash = str(hash(str(destination_workspace)) % 10000)
-            workspace_storage_dir = workspace_storage_base / workspace_hash
-            workspace_storage_dir.mkdir(parents=True, exist_ok=True)
-
-            # Create the state.vscdb file with the ItemTable
-            state_db = workspace_storage_dir / "state.vscdb"
-            # Initialize the database
-            conn = sqlite3.connect(state_db)
-            conn.execute(
-                "CREATE TABLE IF NOT EXISTS ItemTable (key TEXT PRIMARY KEY, value TEXT)"
-            )
-            conn.commit()
-            conn.close()
-
-            # Step 3: Remap snapshot paths to destination paths
-            print("\nRemapping snapshot paths...")
-            snapshot_copy = json.loads(json.dumps(snapshot_data))
-            snapshot_copy = adapter.remap_snapshot_paths(
-                snapshot_copy, str(destination_workspace)
+        with sqlite3.connect(state_db) as connection:
+            connection.execute(
+                "CREATE TABLE ItemTable (key TEXT PRIMARY KEY, value TEXT)"
             )
 
-            # Step 4: Restore unsaved files
-            print("Restoring unsaved files...")
-            adapter.restore_unsaved_files(
-                snapshot_copy.get("files", [])
-            )
+        snapshot_copy = adapter.remap_snapshot_paths(
+            json.loads(json.dumps(snapshot_data)),
+            str(destination_workspace),
+        )
+        adapter.restore_unsaved_files(
+            snapshot_copy.get("files", []),
+            destination_workspace,
+        )
 
-            # Step 5: Restore raw VS Code state
-            print("Restoring raw VS Code state...")
-            success = adapter.restore_raw_state(
-                str(state_db), snapshot_copy
-            )
-            if not success:
-                raise RuntimeError("Failed to restore raw VS Code state")
+        if not adapter.restore_raw_state(str(state_db), snapshot_copy):
+            raise RuntimeError("Failed to restore raw VS Code state")
 
-            # Verification: Check that the state.vscdb was updated correctly
-            print("\nVerifying restored state...")
-            conn = sqlite3.connect(state_db)
-            cursor = conn.cursor()
+        with sqlite3.connect(state_db) as connection:
+            restored_keys = {
+                row[0]
+                for row in connection.execute("SELECT key FROM ItemTable")
+            }
 
-            # Check the workbench.parts.editor key
-            cursor.execute(
-                "SELECT value FROM ItemTable WHERE key=?",
-                ("memento/workbench.parts.editor",)
-            )
-            editor_state_row = cursor.fetchone()
-            if editor_state_row is None:
-                raise RuntimeError(
-                    "memento/workbench.parts.editor not found in state.vscdb"
-                )
-            editor_state = json.loads(editor_state_row[0])
-            print("  ✓ workbench.parts.editor restored")
+        if snapshot_copy.get("editor_state") and (
+            "memento/workbench.parts.editor" not in restored_keys
+        ):
+            raise RuntimeError("Editor state was not restored")
 
-            # Check the workbench.editors.files.textFileEditor key
-            cursor.execute(
-                "SELECT value FROM ItemTable WHERE key=?",
-                ("memento/workbench.editors.files.textFileEditor",)
-            )
-            text_editor_state_row = cursor.fetchone()
-            if text_editor_state_row is None:
-                raise RuntimeError(
-                    "memento/workbench.editors.files.textFileEditor not found in state.vscdb"
-                )
-            text_editor_state = json.loads(text_editor_state_row[0])
-            print("  ✓ workbench.editors.files.textFileEditor restored")
+        if snapshot_copy.get("text_editor_state") and (
+            "memento/workbench.editors.files.textFileEditor" not in restored_keys
+        ):
+            raise RuntimeError("Text editor state was not restored")
 
-            conn.close()
+        for file_data in project.get("files", []):
+            relative_path = portable_project_path(adapter, file_data["path"])
+            restored_path = destination_workspace / relative_path
+            expected_bytes = base64.b64decode(file_data["data"])
 
-            # Verify the project files exist and have correct content
-            print("\nVerifying restored project files...")
-            expected_files = project.get("files", [])
-            expected_directories = project.get("directories", [])
+            if restored_path.read_bytes() != expected_bytes:
+                raise RuntimeError(f"File contents differ: {file_data['path']}")
 
-            restored_files = [
-                path
-                for path in destination_workspace.rglob("*")
-                if path.is_file()
-            ]
-            if len(restored_files) != len(expected_files):
-                raise RuntimeError(
-                    f"Restored file count mismatch: expected {len(expected_files)}, got {len(restored_files)}"
-                )
-
-            verified_files = 0
-            for file_data in expected_files:
-                snapshot_path = Path(file_data["path"])
-                if snapshot_path.is_absolute():
-                    try:
-                        relative_path = snapshot_path.relative_to(source_workspace)
-                    except ValueError:
-                        raise RuntimeError(
-                            f"Snapshot file is outside workspace: {file_data['path']}"
-                        )
-                else:
-                    relative_path = snapshot_path
-
-                restored_path = destination_workspace / relative_path
-                if not restored_path.exists():
-                    raise RuntimeError(
-                        f"Missing restored file: {restored_path}"
-                    )
-
-                encoded_data = file_data.get("data")
-                if encoded_data is None:
-                    raise RuntimeError(
-                        f"No data found for snapshot file: {file_data['path']}"
-                    )
-
-                expected_bytes = base64.b64decode(encoded_data)
-                actual_bytes = restored_path.read_bytes()
-                if actual_bytes != expected_bytes:
-                    raise RuntimeError(
-                        f"File contents differ: {file_data['path']}"
-                    )
-                verified_files += 1
-
-            print(f"  ✓ {verified_files} files verified byte-for-byte")
-
-            # Verify directories
-            verified_directories = 0
-            for directory in expected_directories:
-                snapshot_directory = Path(directory)
-                if snapshot_directory.is_absolute():
-                    try:
-                        relative_directory = snapshot_directory.relative_to(source_workspace)
-                    except ValueError:
-                        raise RuntimeError(
-                            f"Snapshot directory is outside workspace: {directory}"
-                        )
-                else:
-                    relative_directory = snapshot_directory
-
-                restored_directory = destination_workspace / relative_directory
-                if not restored_directory.is_dir():
-                    raise RuntimeError(
-                        f"Missing restored directory: {restored_directory}"
-                    )
-                verified_directories += 1
-
-            print(f"  ✓ {verified_directories} directories verified")
-
-            # Verify active file path after remapping
-            active_file = snapshot_data.get("active_file")
-            if active_file:
-                # The active_file in the snapshot has been remapped by remap_snapshot_paths
-                # We can check the remapped active_file in snapshot_copy
-                remapped_active_file = snapshot_copy.get("active_file")
-                if remapped_active_file:
-                    remapped_path = Path(remapped_active_file)
-                    if not remapped_path.is_relative_to(destination_workspace):
-                        raise RuntimeError(
-                            f"Remapped active file {remapped_active_file} is not inside destination workspace"
-                        )
-                    print(f"  ✓ Active file remapped to: {remapped_active_file}")
-                else:
-                    print("  ! Warning: No active file in remapped snapshot")
-            else:
-                print("  ! No active file in snapshot")
-
-            # Verify open editor paths after remapping (we already verified files exist)
-            open_files = snapshot_data.get("files", [])
-            if open_files:
-                print(f"  ✓ {len(open_files)} open editor paths processed")
-
-            # Verify editor group/layout state exists (we already checked editor_state)
-            if editor_state:
-                print("  ✓ Editor group/layout state exists")
-
-            # Verify text editor state exists (we already checked text_editor_state)
-            if text_editor_state:
-                print("  ✓ Text editor state exists")
-
-            # If the snapshot contains cursor, selection, scroll info, verify they survive remapping
-            # We can check a few files that have text_editor_state
-            files_with_state = 0
-            for file_data in snapshot_copy.get("files", []):
-                if "cursor" in file_data or "selection" in file_data or "scroll" in file_data:
-                    files_with_state += 1
-                    # We could do more detailed checks, but for now just count
-            if files_with_state > 0:
-                print(f"  ✓ {files_with_state} files have cursor/selection/scroll state preserved")
-
-            print("\nFULL SIMULATED CROSS-DEVICE RESTORE SUCCESSFUL")
-            print(
-                "The project was restored and VS Code state was prepared "
-                "in the simulated home environment."
-            )
-
-        finally:
-            # Restore the original HOME environment variable
-            if old_home is None:
-                os.environ.pop("HOME", None)
-            else:
-                os.environ["HOME"] = old_home
-
+        print("\nFULL SIMULATED CROSS-DEVICE RESTORE SUCCESSFUL")
 
 def run_all(client):
     print("\n" + "=" * 60)

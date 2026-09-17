@@ -1,154 +1,381 @@
 #!/usr/bin/env python3
-"""Test script to verify path mapping functionality"""
-
-import tempfile
+import base64
 import os
+import subprocess
+import tempfile
+import unittest
 from pathlib import Path
-from oryn.applications.vscode.adapter import VSCodeAdapter
+from unittest.mock import patch
 
-def test_home_directory_mapping():
-    """Test that home directory mapping works correctly"""
-    print("Testing home directory mapping...")
+from oryn.applications.vscode.adapter import (
+    VSCodeAdapter,
+    VSCodeNotFoundError,
+    VSCodePlatform,
+)
+from oryn.cloud.session import get_session_file
 
-    adapter = VSCodeAdapter()
 
-    # Test case 1: Standard home directory mapping
-    source_path = "/home/mukesh/oryn"
-    # Set HOME to a temporary directory for testing
-    with tempfile.TemporaryDirectory() as temp_home:
-        old_home = os.environ.get("HOME")
-        os.environ["HOME"] = temp_home
+class VSCodePlatformTests(unittest.TestCase):
+
+    def test_linux_executable_lookup(self):
+        platform = VSCodePlatform(
+            platform_name="linux",
+            which=lambda name: "/usr/bin/code" if name == "code" else None,
+        )
+
+        self.assertEqual(platform.code_executable(), "/usr/bin/code")
+
+    def test_windows_executable_lookup(self):
+        platform = VSCodePlatform(
+            platform_name="win32",
+            which=lambda name: "C:/bin/code.cmd" if name == "code.cmd" else None,
+        )
+
+        self.assertEqual(platform.code_executable(), "C:/bin/code.cmd")
+
+    def test_windows_prefers_code_when_available(self):
+        platform = VSCodePlatform(
+            platform_name="win32",
+            which=lambda name: "C:/bin/code" if name == "code" else None,
+        )
+
+        self.assertEqual(platform.code_executable(), "C:/bin/code")
+
+    def test_missing_executable(self):
+        platform = VSCodePlatform(
+            platform_name="linux",
+            which=lambda name: None,
+        )
+
+        self.assertIsNone(platform.code_executable())
+
+        with self.assertRaisesRegex(VSCodeNotFoundError, "VS Code command"):
+            VSCodeAdapter(platform)._code_executable()
+
+    def test_windows_process_detection_and_termination(self):
+        platform = VSCodePlatform(platform_name="win32")
+        tasklist_result = subprocess.CompletedProcess(
+            ["tasklist"],
+            0,
+            '"Code.exe","1234","Console","1","10,000 K"\n',
+            "",
+        )
+        taskkill_result = subprocess.CompletedProcess(
+            ["taskkill"],
+            0,
+            "",
+            "",
+        )
+
+        with patch(
+            "oryn.applications.vscode.adapter.subprocess.run",
+            side_effect=[tasklist_result, tasklist_result, taskkill_result],
+        ) as run:
+            self.assertEqual(platform.vscode_process_ids(), ([1234], None))
+            self.assertEqual(platform.terminate_vscode(), (True, None))
+
+        self.assertEqual(
+            run.call_args_list[-1].args[0],
+            ["taskkill", "/IM", "Code.exe", "/T"],
+        )
+
+    def test_adapter_detection_uses_platform_process_ids(self):
+        class ProcessPlatform:
+            def vscode_process_ids(self):
+                return [41, 42], None
+
+        self.assertEqual(VSCodeAdapter(ProcessPlatform()).detect(), "41\n42")
+
+    def test_platform_storage_and_backup_locations(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            linux_home = Path(temporary_directory) / "linux-home"
+            windows_appdata = Path(temporary_directory) / "appdata"
+
+            linux = VSCodePlatform(
+                platform_name="linux",
+                home_path=linux_home,
+            )
+            self.assertEqual(
+                linux.workspace_storage_path(),
+                linux_home / ".config" / "Code" / "User" / "workspaceStorage",
+            )
+            self.assertEqual(
+                linux.backups_path(),
+                linux_home / ".config" / "Code" / "Backups",
+            )
+
+            windows = VSCodePlatform(
+                platform_name="win32",
+                environ={"APPDATA": str(windows_appdata)},
+            )
+            self.assertEqual(
+                windows.workspace_storage_path(),
+                windows_appdata / "Code" / "User" / "workspaceStorage",
+            )
+            self.assertEqual(
+                windows.backups_path(),
+                windows_appdata / "Code" / "Backups",
+            )
+
+    def test_session_locations(self):
+        home = Path("/home/alice")
+        self.assertEqual(
+            get_session_file("linux", {}, home),
+            home / ".config" / "oryn" / "session.json",
+        )
+        self.assertEqual(
+            get_session_file("win32", {"APPDATA": "C:/Users/Alice/AppData/Roaming"}, home),
+            Path("C:/Users/Alice/AppData/Roaming") / "oryn" / "session.json",
+        )
+
+
+class CrossPlatformPathTests(unittest.TestCase):
+
+    def setUp(self):
+        self.adapter = VSCodeAdapter()
+
+    def test_uri_parsing_with_spaces(self):
+        self.assertEqual(
+            str(self.adapter._snapshot_path("file:///home/alice/my%20project")),
+            "/home/alice/my project",
+        )
+        self.assertEqual(
+            str(self.adapter._snapshot_path("file:///C:/Users/Alice/my%20project")),
+            "C:\\Users\\Alice\\my project",
+        )
+
+    def test_home_mapping_all_platform_pairs(self):
+        cases = [
+            (
+                "/home/alice/projects/oryn",
+                "/home/bob",
+                "/home/bob/projects/oryn",
+            ),
+            (
+                "/home/alice/projects/oryn",
+                "C:\\Users\\Bob",
+                "C:\\Users\\Bob\\projects\\oryn",
+            ),
+            (
+                "C:\\Users\\Alice\\projects\\oryn",
+                "C:\\Users\\Bob",
+                "C:\\Users\\Bob\\projects\\oryn",
+            ),
+            (
+                "C:\\Users\\Alice\\projects\\oryn",
+                "/home/bob",
+                "/home/bob/projects/oryn",
+            ),
+        ]
+
+        for source, destination_home, expected in cases:
+            with self.subTest(source=source, destination_home=destination_home):
+                self.assertEqual(
+                    self.adapter.map_workspace_path(source, destination_home),
+                    expected,
+                )
+
+    def test_home_mapping_rejects_source_traversal(self):
+        self.assertIsNone(
+            self.adapter.map_workspace_path(
+                "/home/alice/project/../../outside",
+                "/home/bob",
+            )
+        )
+
+    def test_component_aware_remapping_for_paths_and_uris(self):
+        snapshot = {
+            "workspace": {"path": "/home/alice/project"},
+            "active_file": "/home/alice/project/src/main.py",
+            "files": [{
+                "path": "/home/alice/project/src/main.py",
+                "uri": "file:///home/alice/project/src/main.py",
+            }],
+            "layout": {
+                "groups": [{"id": 0, "editors": ["/home/alice/project/src/main.py"]}],
+                "active_group": 0,
+                "most_recent_active_groups": [0],
+            },
+            "editor_state": {
+                "path": "/home/alice/project/src/main.py",
+                "uri": "file:///home/alice/project/src/main.py",
+                "near_match": "/home/alice/project-old/main.py",
+            },
+            "text_editor_state": {
+                "file:///home/alice/project/src/main.py": "state",
+            },
+        }
+
+        remapped = self.adapter.remap_snapshot_paths(
+            snapshot,
+            "C:\\Users\\Bob\\project",
+        )
+
+        expected_path = "C:\\Users\\Bob\\project\\src\\main.py"
+        self.assertEqual(remapped["active_file"], expected_path)
+        self.assertEqual(remapped["files"][0]["path"], expected_path)
+        self.assertEqual(
+            remapped["files"][0]["uri"],
+            "file:///C:/Users/Bob/project/src/main.py",
+        )
+        self.assertEqual(remapped["editor_state"]["near_match"], "/home/alice/project-old/main.py")
+        self.assertEqual(
+            remapped["layout"]["groups"][0]["editors"][0],
+            expected_path,
+        )
+        self.assertIn(
+            "file:///C:/Users/Bob/project/src/main.py",
+            remapped["text_editor_state"],
+        )
+
+    def test_windows_to_linux_remapping(self):
+        snapshot = {
+            "workspace": {"path": "file:///C:/Users/Alice/project"},
+            "active_file": "C:\\Users\\Alice\\project\\src\\main.py",
+            "files": [{
+                "path": "C:\\Users\\Alice\\project\\src\\main.py",
+                "uri": "file:///C:/Users/Alice/project/src/main.py",
+            }],
+            "editor_state": {
+                "path": "C:\\Users\\Alice\\project\\src\\main.py",
+            },
+            "text_editor_state": {
+                "file:///C:/Users/Alice/project/src/main.py": "state",
+            },
+        }
+
+        remapped = self.adapter.remap_snapshot_paths(snapshot, "/home/bob/project")
+        self.assertEqual(remapped["active_file"], "/home/bob/project/src/main.py")
+        self.assertEqual(remapped["files"][0]["uri"], "file:///home/bob/project/src/main.py")
+        self.assertEqual(
+            remapped["editor_state"]["path"],
+            "/home/bob/project/src/main.py",
+        )
+        self.assertIn(
+            "file:///home/bob/project/src/main.py",
+            remapped["text_editor_state"],
+        )
+
+    def test_same_platform_remapping(self):
+        linux_snapshot = {
+            "workspace": {"path": "/home/alice/project"},
+            "active_file": "/home/alice/project/src/main.py",
+            "files": [],
+        }
+        windows_snapshot = {
+            "workspace": {"path": "C:\\Users\\Alice\\project"},
+            "active_file": "C:\\Users\\Alice\\project\\src\\main.py",
+            "files": [],
+        }
+
+        self.assertEqual(
+            self.adapter.remap_snapshot_paths(
+                linux_snapshot,
+                "/home/bob/project",
+            )["active_file"],
+            "/home/bob/project/src/main.py",
+        )
+        self.assertEqual(
+            self.adapter.remap_snapshot_paths(
+                windows_snapshot,
+                "C:\\Users\\Bob\\project",
+            )["active_file"],
+            "C:\\Users\\Bob\\project\\src\\main.py",
+        )
+
+
+class RestoreSafetyTests(unittest.TestCase):
+
+    def setUp(self):
+        self.adapter = VSCodeAdapter()
+        self.temporary_directory = tempfile.TemporaryDirectory()
+        self.root = Path(self.temporary_directory.name) / "project"
+        self.outside = Path(self.temporary_directory.name) / "outside.txt"
+
+    def tearDown(self):
+        self.temporary_directory.cleanup()
+
+    def test_windows_relative_project_paths_are_portable(self):
+        project = {
+            "directories": ["src"],
+            "files": [{
+                "path": "src\\main.py",
+                "data": base64.b64encode(b"portable").decode("ascii"),
+            }],
+        }
+
+        self.assertTrue(self.adapter.restore_project(project, self.root))
+        self.assertEqual((self.root / "src" / "main.py").read_bytes(), b"portable")
+        self.assertFalse((self.root / "src\\main.py").exists())
+
+    def test_restore_project_rejects_traversal_and_absolute_paths(self):
+        unsafe_paths = [
+            "../../outside.txt",
+            "../../../etc/file",
+            "..\\..\\outside.txt",
+            "C:\\outside.txt",
+            "/absolute/path",
+            "\\\\server\\share\\file",
+            "src/../../outside.txt",
+        ]
+        project = {
+            "directories": unsafe_paths,
+            "files": [
+                {
+                    "path": path,
+                    "data": base64.b64encode(b"unsafe").decode("ascii"),
+                }
+                for path in unsafe_paths
+            ],
+        }
+
+        self.assertTrue(self.adapter.restore_project(project, self.root))
+        self.assertFalse(self.outside.exists())
+        self.assertFalse((self.root.parent / "etc" / "file").exists())
+
+    def test_restore_project_rejects_symlink_escape(self):
+        outside_directory = self.root.parent / "outside"
+        outside_directory.mkdir()
+        self.root.mkdir()
 
         try:
-            # Create the expected destination structure
-            expected_dest = Path(temp_home) / "oryn"
+            os.symlink(outside_directory, self.root / "linked")
+        except (NotImplementedError, OSError):
+            self.skipTest("Symlinks are unavailable in this environment")
 
-            result = adapter.map_workspace_to_current_home(source_path)
-            print(f"Source: {source_path}")
-            print(f"Mapped to: {repr(result)}")
-            print(f"Expected: {repr(expected_dest)}")
+        project = {
+            "directories": [],
+            "files": [{
+                "path": "linked/escaped.txt",
+                "data": base64.b64encode(b"unsafe").decode("ascii"),
+            }],
+        }
 
-            # Convert result to Path for comparison if it's not already
-            if isinstance(result, str):
-                result_path = Path(result)
-            else:
-                result_path = result
+        self.assertTrue(self.adapter.restore_project(project, self.root))
+        self.assertFalse((outside_directory / "escaped.txt").exists())
 
-            if result_path == expected_dest:
-                print("✓ Home directory mapping works correctly")
-            else:
-                print("✗ Home directory mapping failed")
-                return False
+    def test_restore_unsaved_files_stays_within_workspace(self):
+        self.root.mkdir()
+        safe_file = self.root / "src" / "main.py"
+        malicious_file = self.outside
 
-        finally:
-            if old_home is None:
-                os.environ.pop("HOME", None)
-            else:
-                os.environ["HOME"] = old_home
+        self.adapter.restore_unsaved_files(
+            [
+                {"path": str(safe_file), "content": "safe", "unsaved": True},
+                {"path": str(malicious_file), "content": "unsafe", "unsaved": True},
+                {"path": str(self.root / ".." / "outside-two.txt"), "content": "unsafe", "unsaved": True},
+                {"path": "..\\..\\outside.txt", "content": "unsafe", "unsaved": True},
+                {"path": "C:\\outside.txt", "content": "unsafe", "unsaved": True},
+                {"path": "/absolute/path", "content": "unsafe", "unsaved": True},
+                {"path": "\\\\server\\share\\file", "content": "unsafe", "unsaved": True},
+            ],
+            self.root,
+        )
 
-    # Test case 2: Nested project directory
-    source_path = "/home/mukesh/projects/my-project"
-    with tempfile.TemporaryDirectory() as temp_home:
-        old_home = os.environ.get("HOME")
-        os.environ["HOME"] = temp_home
+        self.assertEqual(safe_file.read_text(), "safe")
+        self.assertFalse(malicious_file.exists())
+        self.assertFalse((self.root.parent / "outside-two.txt").exists())
 
-        try:
-            expected_dest = Path(temp_home) / "projects" / "my-project"
-
-            result = adapter.map_workspace_to_current_home(source_path)
-            print(f"\nSource: {source_path}")
-            print(f"Mapped to: {repr(result)}")
-            print(f"Expected: {repr(expected_dest)}")
-
-            # Convert result to Path for comparison if it's not already
-            if isinstance(result, str):
-                result_path = Path(result)
-            else:
-                result_path = result
-
-            if result_path == expected_dest:
-                print("✓ Nested project directory mapping works correctly")
-            else:
-                print("✗ Nested project directory mapping failed")
-                return False
-
-        finally:
-            if old_home is None:
-                os.environ.pop("HOME", None)
-            else:
-                os.environ["HOME"] = old_home
-
-    return True
-
-def test_path_safety():
-    """Test that path safety measures work"""
-    print("\nTesting path safety...")
-
-    adapter = VSCodeAdapter()
-
-    # Test that absolute paths are rejected in restore_project
-    # We'll test this by checking the logic in restore_project
-
-    print("✓ Path safety checks exist in restore_project (manual verification needed)")
-    return True
-
-def test_replace_paths():
-    """Test the path replacement functionality"""
-    print("\nTesting path replacement...")
-
-    adapter = VSCodeAdapter()
-
-    # Test string replacement
-    source = "/home/mukesh/oryn"
-    dest = "/home/otheruser/oryn"
-
-    test_string = "/home/mukesh/oryn/main.py"
-    expected = "/home/otheruser/oryn/main.py"
-
-    result = adapter.replace_paths(test_string, source, dest)
-    print(f"String replacement: {test_string} -> {result}")
-    if result == expected:
-        print("✓ String replacement works")
-    else:
-        print("✗ String replacement failed")
-        return False
-
-    # Test URI replacement
-    source_uri = "file:///home/mukesh/oryn"
-    dest_uri = "file:///home/otheruser/oryn"
-
-    test_uri = "file:///home/mukesh/oryn/main.py"
-    expected_uri = "file:///home/otheruser/oryn/main.py"
-
-    result = adapter.replace_paths(test_uri, source_uri, dest_uri)
-    print(f"URI replacement: {test_uri} -> {result}")
-    if result == expected_uri:
-        print("✓ URI replacement works")
-    else:
-        print("✗ URI replacement failed")
-        return False
-
-    # Test that non-matching strings are unchanged
-    test_string2 = "/home/user/other.py"
-    result2 = adapter.replace_paths(test_string2, source, dest)
-    if result2 == test_string2:
-        print("✓ Non-matching strings unchanged")
-    else:
-        print("✗ Non-matching strings incorrectly modified")
-        return False
-
-    return True
 
 if __name__ == "__main__":
-    print("Running path mapping tests...\n")
-
-    success = True
-    success &= test_home_directory_mapping()
-    success &= test_path_safety()
-    success &= test_replace_paths()
-
-    if success:
-        print("\n✓ All path mapping tests passed!")
-    else:
-        print("\n✗ Some tests failed!")
-        exit(1)
+    unittest.main()

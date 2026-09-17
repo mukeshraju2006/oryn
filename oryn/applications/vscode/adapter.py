@@ -1,49 +1,223 @@
 import base64
+import csv
 import json
+import os
+import re
+import shutil
+import signal
 import sqlite3
 import subprocess
+import sys
 import time
 import urllib.parse
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 
 from oryn.core.snapshot import Snapshot
 
 
-class VSCodeAdapter:
+class VSCodeNotFoundError(RuntimeError):
+    pass
 
-    def detect(self):
 
-        result = subprocess.run(
-            [
-                "pgrep",
-                "-f",
-                "/usr/share/code/code$",
-            ],
-            capture_output=True,
-            text=True,
+# CHANGED: Keep VS Code platform details in one small helper.
+class VSCodePlatform:
+
+    def __init__(
+        self,
+        platform_name=None,
+        environ=None,
+        which=None,
+        home_path=None,
+    ):
+        self.platform_name = platform_name or sys.platform
+        self.environ = os.environ if environ is None else environ
+        self.which = shutil.which if which is None else which
+        self.home_path = Path.home() if home_path is None else Path(home_path)
+
+    @property
+    def is_windows(self):
+        return self.platform_name.startswith("win")
+
+    def code_executable(self):
+        names = ("code", "code.cmd") if self.is_windows else ("code",)
+
+        for name in names:
+            executable = self.which(name)
+            if executable:
+                return executable
+
+        return None
+
+    def code_user_data_path(self):
+        if self.is_windows:
+            appdata = self.environ.get("APPDATA")
+
+            if appdata:
+                return Path(appdata) / "Code"
+
+            return self.home_path / "AppData" / "Roaming" / "Code"
+
+        return self.home_path / ".config" / "Code"
+
+    def workspace_storage_path(self):
+        return (
+            self.code_user_data_path()
+            / "User"
+            / "workspaceStorage"
         )
+
+    def backups_path(self):
+        return self.code_user_data_path() / "Backups"
+
+    def vscode_process_ids(self):
+        if self.is_windows:
+            return self._windows_vscode_process_ids()
+
+        return self._linux_vscode_process_ids()
+
+    def _linux_vscode_process_ids(self):
+        proc_path = Path("/proc")
+
+        if not proc_path.is_dir():
+            return [], "VS Code process inspection is unavailable on this system."
+
+        process_ids = []
+
+        for process_path in proc_path.iterdir():
+            if not process_path.name.isdigit():
+                continue
+
+            try:
+                process_name = (
+                    process_path / "comm"
+                ).read_text().strip()
+            except OSError:
+                continue
+
+            if process_name == "code":
+                process_ids.append(int(process_path.name))
+
+        return process_ids, None
+
+    def _windows_vscode_process_ids(self):
+        try:
+            result = subprocess.run(
+                [
+                    "tasklist",
+                    "/FO",
+                    "CSV",
+                    "/NH",
+                    "/FI",
+                    "IMAGENAME eq Code.exe",
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        except OSError as error:
+            return [], f"Could not inspect VS Code processes: {error}"
 
         if result.returncode != 0:
+            return [], "Could not inspect VS Code processes with tasklist."
+
+        process_ids = []
+
+        for row in csv.reader(result.stdout.splitlines()):
+            if len(row) < 2 or row[0].lower() != "code.exe":
+                continue
+
+            try:
+                process_ids.append(int(row[1]))
+            except ValueError:
+                continue
+
+        return process_ids, None
+
+    def terminate_vscode(self):
+        process_ids, error = self.vscode_process_ids()
+
+        if error:
+            return False, error
+
+        if not process_ids:
+            return True, None
+
+        if self.is_windows:
+            try:
+                result = subprocess.run(
+                    [
+                        "taskkill",
+                        "/IM",
+                        "Code.exe",
+                        "/T",
+                    ],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+            except OSError as terminate_error:
+                return False, f"Could not close VS Code: {terminate_error}"
+
+            if result.returncode != 0:
+                return False, "Could not close VS Code with taskkill."
+
+            return True, None
+
+        for process_id in process_ids:
+            try:
+                os.kill(process_id, signal.SIGTERM)
+            except ProcessLookupError:
+                continue
+            except OSError as terminate_error:
+                return False, f"Could not close VS Code: {terminate_error}"
+
+        return True, None
+
+
+class VSCodeAdapter:
+
+    def __init__(self, platform=None):
+        self.platform = platform or VSCodePlatform()
+
+    def detect(self):
+        process_ids, error = self.platform.vscode_process_ids()
+
+        if error or not process_ids:
             return None
 
-        return result.stdout.strip()
+        return "\n".join(str(process_id) for process_id in process_ids)
+
+    def _code_executable(self):
+        executable = self.platform.code_executable()
+
+        if executable:
+            return executable
+
+        raise VSCodeNotFoundError(
+            "Could not find the VS Code command. "
+            "Install VS Code and make its command-line launcher available on PATH."
+        )
 
     def get_active_file(self):
+        executable = self._code_executable()
 
-        result = subprocess.run(
-            [
-                "code",
-                "--status",
-            ],
-            capture_output=True,
-            text=True,
-        )
+        try:
+            result = subprocess.run(
+                [
+                    executable,
+                    "--status",
+                ],
+                capture_output=True,
+                text=True,
+            )
+        except OSError as error:
+            print(f"Could not query VS Code status: {error}")
+            return None
 
         if result.returncode != 0:
             return None
 
         for line in result.stdout.splitlines():
-
             line = line.strip()
 
             if "Window (" not in line:
@@ -76,14 +250,7 @@ class VSCodeAdapter:
         return None
 
     def get_workspace_storages(self):
-
-        workspace_storage = (
-            Path.home()
-            / ".config"
-            / "Code"
-            / "User"
-            / "workspaceStorage"
-        )
+        workspace_storage = self.platform.workspace_storage_path()
 
         if not workspace_storage.exists():
             return []
@@ -91,17 +258,11 @@ class VSCodeAdapter:
         workspaces = []
 
         for directory in workspace_storage.iterdir():
-
             if not directory.is_dir():
                 continue
 
-            state_db = (
-                directory / "state.vscdb"
-            )
-
-            workspace_file = (
-                directory / "workspace.json"
-            )
+            state_db = directory / "state.vscdb"
+            workspace_file = directory / "workspace.json"
 
             if (
                 not state_db.exists()
@@ -110,15 +271,12 @@ class VSCodeAdapter:
                 continue
 
             try:
-
                 workspace_data = json.loads(
                     workspace_file.read_text()
                 )
 
-                workspace_path = (
-                    workspace_data.get(
-                        "folder"
-                    )
+                workspace_path = workspace_data.get(
+                    "folder"
                 )
 
                 if not workspace_path:
@@ -145,10 +303,7 @@ class VSCodeAdapter:
         active_file=None,
         workspace_path=None,
     ):
-
-        workspaces = (
-            self.get_workspace_storages()
-        )
+        workspaces = self.get_workspace_storages()
 
         if not workspaces:
             return None
@@ -156,75 +311,50 @@ class VSCodeAdapter:
         # CHANGED:
         # Normalize file:// workspace URIs before comparing paths.
         if workspace_path:
-
-            target_path = (
-                self.normalize_workspace_path(
-                    workspace_path
-                )
-            )
-
-            target_path = str(
-                Path(target_path).resolve()
+            target_path = self.normalize_workspace_path(
+                workspace_path
             )
 
             for workspace in workspaces:
-
-                stored_path = (
-                    self.normalize_workspace_path(
-                        workspace["workspace_path"]
-                    )
+                stored_path = self.normalize_workspace_path(
+                    workspace["workspace_path"]
                 )
 
-                stored_path = str(
-                    Path(stored_path).resolve()
-                )
-
-                if stored_path == target_path:
+                if self._paths_equivalent(
+                    stored_path,
+                    target_path,
+                ):
                     return workspace
 
         if active_file:
-
             for workspace in workspaces:
-
-                result = subprocess.run(
-                    [
-                        "sqlite3",
-                        workspace["state_db"],
-                        "SELECT value FROM ItemTable "
-                        "WHERE key='memento/"
-                        "workbench.parts.editor';",
-                    ],
-                    capture_output=True,
-                    text=True,
+                editor_state = self.get_editor_state(
+                    workspace["state_db"]
                 )
 
-                if result.returncode != 0:
-                    continue
-
-                if active_file in result.stdout:
+                if editor_state and active_file in editor_state:
                     return workspace
 
-        status = subprocess.run(
-            [
-                "code",
-                "--status",
-            ],
-            capture_output=True,
-            text=True,
-        )
+        executable = self._code_executable()
 
-        if status.returncode == 0:
-
-            status_output = (
-                status.stdout
+        try:
+            status = subprocess.run(
+                [
+                    executable,
+                    "--status",
+                ],
+                capture_output=True,
+                text=True,
             )
+        except OSError:
+            status = None
+
+        if status and status.returncode == 0:
+            status_output = status.stdout
 
             for workspace in workspaces:
-
-                stored_path = (
-                    self.normalize_workspace_path(
-                        workspace["workspace_path"]
-                    )
+                stored_path = self.normalize_workspace_path(
+                    workspace["workspace_path"]
                 )
 
                 if stored_path in status_output:
@@ -239,31 +369,16 @@ class VSCodeAdapter:
         self,
         state_db,
     ):
-
-        result = subprocess.run(
-            [
-                "sqlite3",
-                state_db,
-                "SELECT value FROM ItemTable "
-                "WHERE key='memento/"
-                "workbench.parts.editor';",
-            ],
-            capture_output=True,
-            text=True,
+        return self.read_state_value(
+            state_db,
+            "memento/workbench.parts.editor",
         )
-
-        if result.returncode != 0:
-            return None
-
-        return result.stdout.strip()
 
     def parse_editor_state(
         self,
         editor_state,
     ):
-
         try:
-
             data = json.loads(
                 editor_state
             )
@@ -279,30 +394,22 @@ class VSCodeAdapter:
             root = grid["root"]
 
             editors = []
-
             groups = []
-
             group_counter = 0
 
             def walk(node):
-
                 nonlocal group_counter
 
                 if node["type"] == "leaf":
-
                     group_id = group_counter
-
                     group_counter += 1
 
                     group_files = []
 
-                    for editor in node[
-                        "data"
-                    ].get(
+                    for editor in node["data"].get(
                         "editors",
                         [],
                     ):
-
                         if (
                             editor["id"]
                             !=
@@ -311,16 +418,13 @@ class VSCodeAdapter:
                             continue
 
                         try:
-
                             editor_data = json.loads(
                                 editor["value"]
                             )
 
-                            resource = (
-                                editor_data[
-                                    "resourceJSON"
-                                ]
-                            )
+                            resource = editor_data[
+                                "resourceJSON"
+                            ]
 
                             file_data = {
                                 "path": resource[
@@ -357,7 +461,6 @@ class VSCodeAdapter:
                     )
 
                 elif node["type"] == "branch":
-
                     for child in node["data"]:
                         walk(child)
 
@@ -365,18 +468,12 @@ class VSCodeAdapter:
 
             layout = {
                 "groups": groups,
-
-                "active_group": (
-                    editor_part.get(
-                        "activeGroup"
-                    )
+                "active_group": editor_part.get(
+                    "activeGroup"
                 ),
-
-                "most_recent_active_groups": (
-                    editor_part.get(
-                        "mostRecentActiveGroups",
-                        [],
-                    )
+                "most_recent_active_groups": editor_part.get(
+                    "mostRecentActiveGroups",
+                    [],
                 ),
             }
 
@@ -396,45 +493,61 @@ class VSCodeAdapter:
         self,
         state_db,
     ):
-
-        result = subprocess.run(
-            [
-                "sqlite3",
-                state_db,
-                "SELECT value FROM ItemTable "
-                "WHERE key='memento/"
-                "workbench.editors.files."
-                "textFileEditor';",
-            ],
-            capture_output=True,
-            text=True,
+        value = self.read_state_value(
+            state_db,
+            "memento/workbench.editors.files.textFileEditor",
         )
 
-        if result.returncode != 0:
+        if value is None:
             return None
 
         try:
-
             return json.loads(
-                result.stdout.strip()
+                value
             )
 
         except json.JSONDecodeError:
             return None
+
+    def read_state_value(
+        self,
+        state_db,
+        key,
+    ):
+        try:
+            database_uri = (
+                Path(state_db)
+                .resolve()
+                .as_uri()
+                + "?mode=ro"
+            )
+
+            with sqlite3.connect(
+                database_uri,
+                uri=True,
+            ) as connection:
+                row = connection.execute(
+                    "SELECT value FROM ItemTable WHERE key = ?",
+                    (key,),
+                ).fetchone()
+
+        except sqlite3.Error:
+            return None
+
+        if row is None:
+            return None
+
+        return row[0]
 
     def parse_text_editor_state(
         self,
         text_editor_state,
         open_editors,
     ):
-
         try:
-
-            view_states = (
-                text_editor_state[
-                    "textEditorViewState"
-                ]
-            )
+            view_states = text_editor_state[
+                "textEditorViewState"
+            ]
 
             open_paths = {
                 editor["path"]
@@ -444,22 +557,25 @@ class VSCodeAdapter:
             result = {}
 
             for entry in view_states:
-
                 file_uri, file_data = entry
 
-                parsed_uri = (
-                    urllib.parse.urlparse(
-                        file_uri
-                    )
+                file_path = self.normalize_workspace_path(
+                    file_uri
                 )
 
-                file_path = (
-                    urllib.parse.unquote(
-                        parsed_uri.path
-                    )
+                matching_open_path = next(
+                    (
+                        open_path
+                        for open_path in open_paths
+                        if self._paths_equivalent(
+                            file_path,
+                            open_path,
+                        )
+                    ),
+                    None,
                 )
 
-                if file_path not in open_paths:
+                if matching_open_path is None:
                     continue
 
                 for (
@@ -467,18 +583,14 @@ class VSCodeAdapter:
                     editor_state,
                 ) in file_data.items():
 
-                    cursor_states = (
-                        editor_state.get(
-                            "cursorState",
-                            [],
-                        )
+                    cursor_states = editor_state.get(
+                        "cursorState",
+                        [],
                     )
 
-                    view_state = (
-                        editor_state.get(
-                            "viewState",
-                            {},
-                        )
+                    view_state = editor_state.get(
+                        "viewState",
+                        {},
                     )
 
                     if not cursor_states:
@@ -491,104 +603,66 @@ class VSCodeAdapter:
                         {},
                     )
 
-                    selection_start = (
-                        cursor.get(
-                            "selectionStart",
-                            {},
-                        )
+                    selection_start = cursor.get(
+                        "selectionStart",
+                        {},
                     )
 
-                    selection_end = (
-                        cursor.get(
-                            "position",
-                            {},
-                        )
+                    selection_end = cursor.get(
+                        "position",
+                        {},
                     )
 
-                    first_position = (
-                        view_state.get(
-                            "firstPosition",
-                            {},
-                        )
+                    first_position = view_state.get(
+                        "firstPosition",
+                        {},
                     )
 
-                    result[file_path] = {
-
+                    result[matching_open_path] = {
                         "group": int(
                             group_id
                         ),
-
                         "cursor": {
-
                             "line": position.get(
                                 "lineNumber"
                             ),
-
                             "column": position.get(
                                 "column"
                             ),
                         },
-
                         "selection": {
-
                             "start": {
-
-                                "line": (
-                                    selection_start.get(
-                                        "lineNumber"
-                                    )
-                                ),
-
-                                "column": (
-                                    selection_start.get(
-                                        "column"
-                                    )
-                                ),
-                            },
-
-                            "end": {
-
-                                "line": (
-                                    selection_end.get(
-                                        "lineNumber"
-                                    )
-                                ),
-
-                                "column": (
-                                    selection_end.get(
-                                        "column"
-                                    )
-                                ),
-                            },
-                        },
-
-                        "scroll": {
-
-                            "line": (
-                                first_position.get(
+                                "line": selection_start.get(
                                     "lineNumber"
-                                )
-                            ),
-
-                            "column": (
-                                first_position.get(
+                                ),
+                                "column": selection_start.get(
                                     "column"
-                                )
+                                ),
+                            },
+                            "end": {
+                                "line": selection_end.get(
+                                    "lineNumber"
+                                ),
+                                "column": selection_end.get(
+                                    "column"
+                                ),
+                            },
+                        },
+                        "scroll": {
+                            "line": first_position.get(
+                                "lineNumber"
+                            ),
+                            "column": first_position.get(
+                                "column"
                             ),
                         },
-
-                        "scroll_left": (
-                            view_state.get(
-                                "scrollLeft",
-                                0,
-                            )
+                        "scroll_left": view_state.get(
+                            "scrollLeft",
+                            0,
                         ),
-
-                        "first_position_delta_top": (
-                            view_state.get(
-                                "firstPositionDeltaTop",
-                                0,
-                            )
+                        "first_position_delta_top": view_state.get(
+                            "firstPositionDeltaTop",
+                            0,
                         ),
                     }
 
@@ -605,25 +679,19 @@ class VSCodeAdapter:
         self,
         file_path,
     ):
-
-        backups_root = (
-            Path.home()
-            / ".config"
-            / "Code"
-            / "Backups"
-        )
+        backups_root = self.platform.backups_path()
 
         if not backups_root.exists():
             return None
 
-        file_uri = Path(
-            file_path
-        ).as_uri()
+        parsed_path = self._snapshot_path(file_path)
 
-        for backup_directory in (
-            backups_root.iterdir()
-        ):
+        if parsed_path is None or not parsed_path.is_absolute():
+            return None
 
+        file_uri = self._path_to_uri(parsed_path)
+
+        for backup_directory in backups_root.iterdir():
             if not backup_directory.is_dir():
                 continue
 
@@ -634,24 +702,17 @@ class VSCodeAdapter:
             if not file_directory.exists():
                 continue
 
-            for backup_file in (
-                file_directory.iterdir()
-            ):
-
+            for backup_file in file_directory.iterdir():
                 if not backup_file.is_file():
                     continue
 
                 try:
-
                     with backup_file.open(
                         "r",
                         encoding="utf-8",
                         errors="replace",
                     ) as file:
-
-                        first_line = (
-                            file.readline().strip()
-                        )
+                        first_line = file.readline().strip()
 
                         if not first_line:
                             continue
@@ -666,10 +727,7 @@ class VSCodeAdapter:
 
                         backup_uri = parts[0]
 
-                        if (
-                            backup_uri
-                            != file_uri
-                        ):
+                        if backup_uri != file_uri:
                             continue
 
                         content = file.read()
@@ -688,24 +746,17 @@ class VSCodeAdapter:
         self,
         editors,
     ):
-
         unsaved_changes = {}
 
         for editor in editors:
-
             path = editor["path"]
 
-            backup = (
-                self.find_unsaved_backup(
-                    path
-                )
+            backup = self.find_unsaved_backup(
+                path
             )
 
             if backup:
-
-                unsaved_changes[
-                    path
-                ] = backup["content"]
+                unsaved_changes[path] = backup["content"]
 
         return unsaved_changes
 
@@ -719,7 +770,6 @@ class VSCodeAdapter:
         workspace_path,
         files,
     ):
-
         workspace = Path(
             workspace_path
         ).resolve()
@@ -745,7 +795,6 @@ class VSCodeAdapter:
         unsaved_content = {}
 
         for file_data in files:
-
             if not file_data.get(
                 "unsaved"
             ):
@@ -763,7 +812,6 @@ class VSCodeAdapter:
                 continue
 
             try:
-
                 relative = (
                     Path(path)
                     .resolve()
@@ -771,7 +819,7 @@ class VSCodeAdapter:
                 )
 
                 unsaved_content[
-                    str(relative)
+                    relative.as_posix()
                 ] = content.encode(
                     "utf-8"
                 )
@@ -783,14 +831,12 @@ class VSCodeAdapter:
                 continue
 
         project_files = []
-
         directories = []
 
         if (
             not workspace.exists()
             or not workspace.is_dir()
         ):
-
             return {
                 "root": ".",
                 "directories": [],
@@ -800,8 +846,6 @@ class VSCodeAdapter:
         # CHANGED:
         # os.walk lets us prune dependency/cache directories before
         # entering them, instead of recursively scanning their contents.
-        import os
-
         for (
             current_root,
             directory_names,
@@ -824,26 +868,20 @@ class VSCodeAdapter:
                 )
             )
 
-            for directory_name in (
-                directory_names
-            ):
-
+            for directory_name in directory_names:
                 directory_path = (
-                    current_path
-                    / directory_name
+                    current_path / directory_name
                 )
 
                 try:
-
                     relative = (
-                        directory_path
-                        .relative_to(
+                        directory_path.relative_to(
                             workspace
                         )
                     )
 
                     directories.append(
-                        str(relative)
+                        relative.as_posix()
                     )
 
                 except ValueError:
@@ -852,10 +890,8 @@ class VSCodeAdapter:
             for file_name in sorted(
                 file_names
             ):
-
                 file_path = (
-                    current_path
-                    / file_name
+                    current_path / file_name
                 )
 
                 if (
@@ -865,30 +901,24 @@ class VSCodeAdapter:
                     continue
 
                 try:
-
                     relative = (
                         file_path.relative_to(
                             workspace
                         )
                     )
 
-                    relative_string = str(
-                        relative
-                    )
+                    relative_string = relative.as_posix()
 
                     if (
                         relative_string
                         in unsaved_content
                     ):
-
                         raw_data = (
                             unsaved_content[
                                 relative_string
                             ]
                         )
-
                     else:
-
                         raw_data = (
                             file_path.read_bytes()
                         )
@@ -909,7 +939,6 @@ class VSCodeAdapter:
                     )
 
                 except OSError as error:
-
                     print(
                         f"Could not capture project file "
                         f"{file_path}: {error}"
@@ -929,61 +958,343 @@ class VSCodeAdapter:
         }
 
     # CHANGED:
-    # Map a Linux source workspace under /home/<user> to the
-    # equivalent path under the current user's home directory.
-    #
-    # IMPORTANT:
-    # The source may be a VS Code file:// URI, so normalize it
-    # before converting it to a Path.
-    def map_workspace_to_current_home(
-        self,
-        source_workspace,
-    ):
+    # Parse snapshot paths using their own syntax rather than the
+    # destination machine's filesystem rules.
+    def _snapshot_path(self, value):
+        if not isinstance(value, str) or not value:
+            return None
 
-        # CHANGED:
-        # Normalize file:// URI before Path operations.
-        source_workspace = (
-            self.normalize_workspace_path(
-                source_workspace
+        raw_path = value
+
+        if value.startswith("file://"):
+            parsed = urllib.parse.urlparse(value)
+            raw_path = urllib.parse.unquote(
+                parsed.path
+            )
+
+            if (
+                parsed.netloc
+                and parsed.netloc.lower() != "localhost"
+            ):
+                return PureWindowsPath(
+                    "//" + parsed.netloc + raw_path
+                )
+
+            if re.match(
+                r"^/[A-Za-z]:[\\/]",
+                raw_path,
+            ):
+                raw_path = raw_path[1:]
+
+        if (
+            re.match(
+                r"^[A-Za-z]:",
+                raw_path,
+            )
+            or raw_path.startswith("\\\\")
+            or raw_path.startswith("//")
+            or "\\" in raw_path
+        ):
+            return PureWindowsPath(
+                raw_path
+            )
+
+        return PurePosixPath(
+            raw_path
+        )
+
+    def _relative_parts(
+        self,
+        path,
+        root,
+    ):
+        if (
+            path is None
+            or root is None
+            or type(path) is not type(root)
+        ):
+            return None
+
+        path_parts = path.parts
+        root_parts = root.parts
+
+        if len(path_parts) < len(root_parts):
+            return None
+
+        if isinstance(
+            path,
+            PureWindowsPath,
+        ):
+            matches = all(
+                path_part.casefold()
+                == root_part.casefold()
+                for path_part, root_part in zip(
+                    path_parts,
+                    root_parts,
+                )
+            )
+        else:
+            matches = (
+                path_parts[
+                    :len(root_parts)
+                ]
+                == root_parts
+            )
+
+        if not matches:
+            return None
+
+        return path_parts[
+            len(root_parts):
+        ]
+
+    def _path_to_uri(
+        self,
+        path,
+    ):
+        value = str(path).replace(
+            "\\",
+            "/",
+        )
+
+        if value.startswith("//"):
+            return (
+                "file:"
+                + urllib.parse.quote(
+                    value,
+                    safe="/:@",
+                )
+            )
+
+        if re.match(
+            r"^[A-Za-z]:/",
+            value,
+        ):
+            value = "/" + value
+
+        return (
+            "file://"
+            + urllib.parse.quote(
+                value,
+                safe="/:@",
             )
         )
 
-        source = Path(
+    def _remap_path_value(
+        self,
+        value,
+        source_root,
+        destination_root,
+    ):
+        path = self._snapshot_path(
+            value
+        )
+        source = self._snapshot_path(
+            source_root
+        )
+        destination = self._snapshot_path(
+            destination_root
+        )
+
+        relative_parts = self._relative_parts(
+            path,
+            source,
+        )
+
+        if (
+            relative_parts is None
+            or destination is None
+        ):
+            return value
+
+        remapped = destination.joinpath(
+            *relative_parts
+        )
+
+        if (
+            isinstance(value, str)
+            and value.startswith("file://")
+        ):
+            return self._path_to_uri(
+                remapped
+            )
+
+        return str(remapped)
+
+    def _paths_equivalent(
+        self,
+        first,
+        second,
+    ):
+        first_path = self._snapshot_path(
+            first
+        )
+        second_path = self._snapshot_path(
+            second
+        )
+
+        if (
+            first_path is None
+            or second_path is None
+        ):
+            return False
+
+        if type(first_path) is not type(
+            second_path
+        ):
+            return False
+
+        if isinstance(
+            first_path,
+            PureWindowsPath,
+        ):
+            return (
+                str(first_path).casefold()
+                == str(second_path).casefold()
+            )
+
+        return first_path == second_path
+
+    def map_workspace_path(
+        self,
+        source_workspace,
+        destination_home,
+    ):
+        source = self._snapshot_path(
             source_workspace
-        ).resolve()
+        )
+        destination = self._snapshot_path(
+            destination_home
+        )
+
+        if (
+            source is None
+            or destination is None
+            or not destination.is_absolute()
+        ):
+            return None
 
         parts = source.parts
 
         if (
-            len(parts) < 3
-            or parts[0] != "/"
-            or parts[1] != "home"
+            isinstance(
+                source,
+                PurePosixPath,
+            )
+            and len(parts) >= 3
+            and parts[0] == "/"
+            and parts[1] == "home"
         ):
+            relative_parts = parts[3:]
 
+        elif (
+            isinstance(
+                source,
+                PureWindowsPath,
+            )
+            and source.is_absolute()
+            and len(parts) >= 4
+            and parts[1].casefold() == "users"
+        ):
+            relative_parts = parts[3:]
+
+        else:
             return None
 
-        source_home = (
-            Path("/")
-            / "home"
-            / parts[2]
+        if any(
+            part in (
+                ".",
+                "..",
+            )
+            for part in relative_parts
+        ):
+            return None
+
+        return str(
+            destination.joinpath(
+                *relative_parts
+            )
         )
 
-        try:
-
-            relative = (
-                source.relative_to(
-                    source_home
-                )
-            )
-
-        except ValueError:
-
-            return None
+    def map_workspace_to_current_home(
+        self,
+        source_workspace,
+    ):
+        destination = self.map_workspace_path(
+            source_workspace,
+            str(Path.home()),
+        )
 
         return (
-            Path.home()
-            / relative
+            Path(destination)
+            if destination
+            else None
         )
+
+    def _portable_relative_parts(
+        self,
+        value,
+    ):
+        path = self._snapshot_path(
+            value
+        )
+
+        if (
+            path is None
+            or path.is_absolute()
+            or (
+                isinstance(
+                    path,
+                    PureWindowsPath,
+                )
+                and path.drive
+            )
+        ):
+            return None
+
+        parts = tuple(
+            part
+            for part in path.parts
+            if part not in (
+                "",
+                ".",
+            )
+        )
+
+        if (
+            not parts
+            or any(
+                part == ".."
+                for part in parts
+            )
+        ):
+            return None
+
+        return parts
+
+    def _safe_relative_destination(
+        self,
+        destination,
+        relative_path,
+    ):
+        parts = self._portable_relative_parts(
+            relative_path
+        )
+
+        if parts is None:
+            return None
+
+        target = destination.joinpath(
+            *parts
+        )
+
+        if not self._is_path_within_directory(
+            target,
+            destination,
+        ):
+            return None
+
+        return target
 
     # CHANGED:
     # Recreate a missing project from the cloud snapshot.
@@ -992,21 +1303,18 @@ class VSCodeAdapter:
         project,
         destination_workspace,
     ):
-
-        destination = (
-            Path(
-                destination_workspace
-            ).resolve()
+        requested_destination = Path(
+            destination_workspace
         )
 
-        # CHANGED:
-        # Validate that destination is a valid directory path
-        if not destination.is_absolute():
+        if not requested_destination.is_absolute():
             print(
                 f"Destination workspace path must be absolute: "
                 f"{destination_workspace}"
             )
             return False
+
+        destination = requested_destination.resolve()
 
         destination.mkdir(
             parents=True,
@@ -1014,7 +1322,7 @@ class VSCodeAdapter:
         )
 
         # CHANGED:
-        # Double-check that destination directory was created successfully
+        # Double-check that destination directory was created successfully.
         if not destination.is_dir():
             print(
                 f"Failed to create destination workspace directory: "
@@ -1028,11 +1336,17 @@ class VSCodeAdapter:
         )
 
         for relative_path in directories:
-
-            target = (
-                destination
-                / relative_path
+            target = self._safe_relative_destination(
+                destination,
+                relative_path,
             )
+
+            if target is None:
+                print(
+                    f"Skipping unsafe project directory: "
+                    f"{relative_path}"
+                )
+                continue
 
             try:
                 target.mkdir(
@@ -1040,44 +1354,23 @@ class VSCodeAdapter:
                     exist_ok=True,
                 )
 
-                # CHANGED:
-                # Validate that created directory is within destination
-                if not self._is_path_within_directory(target, destination):
-                    print(
-                        f"Skipping unsafe project directory (path traversal): "
-                        f"{relative_path}"
-                    )
-                    # Remove the incorrectly created directory
-                    try:
-                        target.rmdir()
-                    except OSError:
-                        pass  # Ignore errors during cleanup
-                    continue
-
             except OSError as error:
-
                 print(
                     f"Could not create project "
                     f"directory {target}: {error}"
                 )
-
                 return False
 
         for file_data in project.get(
             "files",
             [],
         ):
-
-            relative_path = (
-                file_data.get(
-                    "path"
-                )
+            relative_path = file_data.get(
+                "path"
             )
 
-            encoded_data = (
-                file_data.get(
-                    "data"
-                )
+            encoded_data = file_data.get(
+                "data"
             )
 
             if (
@@ -1086,47 +1379,37 @@ class VSCodeAdapter:
             ):
                 continue
 
-            relative = Path(
-                relative_path
+            target = self._safe_relative_destination(
+                destination,
+                relative_path,
             )
 
-            if (
-                relative.is_absolute()
-                or ".." in relative.parts
-            ):
-
+            if target is None:
                 print(
                     f"Skipping unsafe project path: "
                     f"{relative_path}"
                 )
-
                 continue
 
-            target = (
-                destination
-                / relative
-            )
-
             try:
-
                 target.parent.mkdir(
                     parents=True,
                     exist_ok=True,
                 )
 
-                # CHANGED:
-                # Validate that target file is within destination
-                if not self._is_path_within_directory(target, destination):
+                if not self._is_path_within_directory(
+                    target,
+                    destination,
+                ):
                     print(
-                        f"Skipping unsafe project file (path traversal): "
+                        f"Skipping unsafe project file "
+                        f"(path traversal): "
                         f"{relative_path}"
                     )
                     continue
 
-                raw_data = (
-                    base64.b64decode(
-                        encoded_data
-                    )
+                raw_data = base64.b64decode(
+                    encoded_data
                 )
 
                 target.write_bytes(
@@ -1137,39 +1420,31 @@ class VSCodeAdapter:
                 OSError,
                 ValueError,
             ) as error:
-
                 print(
                     f"Could not restore project "
                     f"file {target}: {error}"
                 )
-
                 return False
 
         return True
 
-    # CHANGED:
-    # Helper method to check if a path is within a directory
-    def _is_path_within_directory(self, path, directory):
-        """
-        Check if a path is within a directory, resolving symlinks and
-        preventing path traversal attacks.
-
-        Args:
-            path: Path to check
-            directory: Directory that should contain the path
-
-        Returns:
-            bool: True if path is within directory, False otherwise
-        """
+    def _is_path_within_directory(
+        self,
+        path,
+        directory,
+    ):
         try:
-            # Resolve both paths to eliminate symlinks and normalize
             resolved_path = path.resolve()
             resolved_directory = directory.resolve()
 
-            # Check if the resolved path starts with the resolved directory
-            return resolved_path.is_relative_to(resolved_directory)
-        except (ValueError, OSError):
-            # If resolution fails, consider it unsafe
+            return resolved_path.is_relative_to(
+                resolved_directory
+            )
+
+        except (
+            ValueError,
+            OSError,
+        ):
             return False
 
     # CHANGED:
@@ -1181,49 +1456,20 @@ class VSCodeAdapter:
         source_root,
         destination_root,
     ):
-
         if isinstance(
             value,
             str,
         ):
-
-            if value.startswith(
-                source_root
-            ):
-
-                return (
-                    destination_root
-                    + value[
-                        len(source_root):
-                    ]
-                )
-
-            source_uri = Path(
-                source_root
-            ).as_uri()
-
-            destination_uri = Path(
-                destination_root
-            ).as_uri()
-
-            if value.startswith(
-                source_uri
-            ):
-
-                return (
-                    destination_uri
-                    + value[
-                        len(source_uri):
-                    ]
-                )
-
-            return value
+            return self._remap_path_value(
+                value,
+                source_root,
+                destination_root,
+            )
 
         if isinstance(
             value,
             list,
         ):
-
             return [
                 self.replace_paths(
                     item,
@@ -1237,13 +1483,24 @@ class VSCodeAdapter:
             value,
             dict,
         ):
-
             return {
-                key: self.replace_paths(
-                    item,
-                    source_root,
-                    destination_root,
-                )
+                (
+                    self._remap_path_value(
+                        key,
+                        source_root,
+                        destination_root,
+                    )
+                    if isinstance(
+                        key,
+                        str,
+                    )
+                    else key
+                ):
+                    self.replace_paths(
+                        item,
+                        source_root,
+                        destination_root,
+                    )
                 for key, item in value.items()
             }
 
@@ -1256,35 +1513,20 @@ class VSCodeAdapter:
         snapshot_data,
         destination_root,
     ):
-
         workspace = snapshot_data.get(
             "workspace",
-            {},
+            {}
         )
 
-        source_workspace = (
-            workspace.get("path")
+        source_workspace = workspace.get(
+            "path"
         )
 
         if not source_workspace:
             return snapshot_data
 
-        source_workspace = (
-            self.normalize_workspace_path(
-                source_workspace
-            )
-        )
-
-        source_workspace = str(
-            Path(
-                source_workspace
-            ).resolve()
-        )
-
         destination_root = str(
-            Path(
-                destination_root
-            ).resolve()
+            destination_root
         )
 
         # CHANGED:
@@ -1292,7 +1534,6 @@ class VSCodeAdapter:
         if snapshot_data.get(
             "editor_state"
         ):
-
             snapshot_data[
                 "editor_state"
             ] = self.replace_paths(
@@ -1306,12 +1547,24 @@ class VSCodeAdapter:
         if snapshot_data.get(
             "text_editor_state"
         ):
-
             snapshot_data[
                 "text_editor_state"
             ] = self.replace_paths(
                 snapshot_data[
                     "text_editor_state"
+                ],
+                source_workspace,
+                destination_root,
+            )
+
+        if snapshot_data.get(
+            "layout"
+        ):
+            snapshot_data[
+                "layout"
+            ] = self.replace_paths(
+                snapshot_data[
+                    "layout"
                 ],
                 source_workspace,
                 destination_root,
@@ -1323,51 +1576,17 @@ class VSCodeAdapter:
             "files",
             [],
         ):
-
-            path = file_data.get(
-                "path"
-            )
-
-            if path:
-
-                path = str(
-                    Path(path)
-                )
-
-                if path.startswith(
-                    source_workspace
-                ):
-
-                    file_data["path"] = (
-                        destination_root
-                        + path[
-                            len(source_workspace):
-                        ]
-                    )
-
-            uri = file_data.get(
-                "uri"
-            )
-
-            if uri:
-
-                source_uri = Path(
-                    source_workspace
-                ).as_uri()
-
-                destination_uri = Path(
-                    destination_root
-                ).as_uri()
-
-                if uri.startswith(
-                    source_uri
-                ):
-
-                    file_data["uri"] = (
-                        destination_uri
-                        + uri[
-                            len(source_uri):
-                        ]
+            for key in (
+                "path",
+                "uri",
+            ):
+                if file_data.get(key):
+                    file_data[key] = (
+                        self._remap_path_value(
+                            file_data[key],
+                            source_workspace,
+                            destination_root,
+                        )
                     )
 
         active_file = snapshot_data.get(
@@ -1375,19 +1594,13 @@ class VSCodeAdapter:
         )
 
         if active_file:
-
-            if active_file.startswith(
-                source_workspace
-            ):
-
-                snapshot_data[
-                    "active_file"
-                ] = (
-                    destination_root
-                    + active_file[
-                        len(source_workspace):
-                    ]
-                )
+            snapshot_data[
+                "active_file"
+            ] = self._remap_path_value(
+                active_file,
+                source_workspace,
+                destination_root,
+            )
 
         # CHANGED:
         # Update workspace path itself.
@@ -1403,22 +1616,18 @@ class VSCodeAdapter:
         self,
         workspace_path,
     ):
-
-        workspace_path = str(
-            Path(
+        workspace_path = (
+            self.normalize_workspace_path(
                 workspace_path
-            ).resolve()
+            )
         )
 
         for workspace in (
             self.get_workspace_storages()
         ):
-
-            stored_path = (
-                workspace[
-                    "workspace_path"
-                ]
-            )
+            stored_path = workspace[
+                "workspace_path"
+            ]
 
             stored_path = (
                 self.normalize_workspace_path(
@@ -1426,17 +1635,10 @@ class VSCodeAdapter:
                 )
             )
 
-            stored_path = str(
-                Path(
-                    stored_path
-                ).resolve()
-            )
-
-            if (
-                stored_path
-                == workspace_path
+            if self._paths_equivalent(
+                stored_path,
+                workspace_path,
             ):
-
                 return workspace
 
         return None
@@ -1450,11 +1652,9 @@ class VSCodeAdapter:
         key,
         value,
     ):
-
         connection = None
 
         try:
-
             connection = sqlite3.connect(
                 state_db
             )
@@ -1480,7 +1680,6 @@ class VSCodeAdapter:
             return True
 
         except sqlite3.Error as error:
-
             print(
                 f"Could not update VS Code state "
                 f"{key}: {error}"
@@ -1489,7 +1688,6 @@ class VSCodeAdapter:
             return False
 
         finally:
-
             if connection:
                 connection.close()
 
@@ -1501,44 +1699,33 @@ class VSCodeAdapter:
         state_db,
         snapshot_data,
     ):
-
         editor_state = snapshot_data.get(
             "editor_state"
         )
 
-        text_editor_state = (
-            snapshot_data.get(
-                "text_editor_state"
-            )
+        text_editor_state = snapshot_data.get(
+            "text_editor_state"
         )
 
         success = True
 
         if editor_state:
-
             if not self.write_state_value(
                 state_db,
-                (
-                    "memento/"
-                    "workbench.parts.editor"
-                ),
+                "memento/"
+                "workbench.parts.editor",
                 editor_state,
             ):
-
                 success = False
 
         if text_editor_state:
-
             if not self.write_state_value(
                 state_db,
-                (
-                    "memento/"
-                    "workbench.editors.files."
-                    "textFileEditor"
-                ),
+                "memento/"
+                "workbench.editors.files."
+                "textFileEditor",
                 text_editor_state,
             ):
-
                 success = False
 
         return success
@@ -1547,26 +1734,26 @@ class VSCodeAdapter:
         self,
         workspace_path,
     ):
+        path = self._snapshot_path(
+            workspace_path
+        )
 
-        if workspace_path.startswith(
-            "file://"
-        ):
-
-            return urllib.parse.unquote(
-                urllib.parse.urlparse(
-                    workspace_path
-                ).path
-            )
-
-        return workspace_path
+        return (
+            str(path)
+            if path is not None
+            else workspace_path
+        )
 
     def restore_unsaved_files(
         self,
         files,
+        destination_workspace,
     ):
+        destination = Path(
+            destination_workspace
+        ).resolve()
 
         for file_data in files:
-
             if not file_data.get(
                 "unsaved",
                 False,
@@ -1587,18 +1774,46 @@ class VSCodeAdapter:
             ):
                 continue
 
-            file_path = Path(
-                path
-            )
+            file_path = Path(path)
+
+            if (
+                not file_path.is_absolute()
+                or not self._is_path_within_directory(
+                    file_path,
+                    destination,
+                )
+            ):
+                print(
+                    f"Skipping unsafe unsaved file path: {path}"
+                )
+                continue
 
             try:
+                file_path = file_path.resolve()
+
+                if not self._is_path_within_directory(
+                    file_path,
+                    destination,
+                ):
+                    print(
+                        f"Skipping unsafe unsaved file path: {path}"
+                    )
+                    continue
 
                 if file_path.exists():
-
                     backup_path = Path(
                         str(file_path)
                         + ".oryn-backup"
                     )
+
+                    if not self._is_path_within_directory(
+                        backup_path,
+                        destination,
+                    ):
+                        print(
+                            f"Skipping unsafe unsaved file path: {path}"
+                        )
+                        continue
 
                     backup_path.write_bytes(
                         file_path.read_bytes()
@@ -1609,13 +1824,21 @@ class VSCodeAdapter:
                     exist_ok=True,
                 )
 
+                if not self._is_path_within_directory(
+                    file_path,
+                    destination,
+                ):
+                    print(
+                        f"Skipping unsafe unsaved file path: {path}"
+                    )
+                    continue
+
                 file_path.write_text(
                     content,
                     encoding="utf-8",
                 )
 
             except OSError as error:
-
                 print(
                     f"Could not restore "
                     f"unsaved file {path}: "
@@ -1623,63 +1846,114 @@ class VSCodeAdapter:
                 )
 
     # CHANGED:
-    # Launch the destination workspace first so VS Code
-    # creates its workspaceStorage directory.
+    # Launch VS Code only when destination workspace storage does
+    # not already exist. This prevents opening another VS Code
+    # instance when VS Code is already running.
     def prepare_destination_workspace(
         self,
         workspace_path,
     ):
+        executable = self._code_executable()
 
-        subprocess.Popen(
-            [
-                "code",
-                workspace_path,
-            ]
-        )
+        if not executable:
+            return None
 
-        # Give VS Code time to initialize workspace storage.
-        time.sleep(3)
-
-        return self.find_storage_by_path(
+        # First check whether VS Code has already created storage
+        # for this workspace.
+        existing_storage = self.find_storage_by_path(
             workspace_path
         )
 
-    # CHANGED:
-    # Close VS Code before directly modifying state.vscdb.
-    #
-    # This prevents VS Code from overwriting our restored
-    # database state while it is running.
-    def close_vscode(self):
+        if existing_storage:
+            return existing_storage
 
-        result = subprocess.run(
-            [
-                "pkill",
-                "-f",
-                "/usr/share/code/code$",
-            ],
-            capture_output=True,
-            text=True,
-        )
-
-        # pkill returning 1 simply means there was
-        # nothing left to kill.
-        if result.returncode not in (
-            0,
-            1,
-        ):
-
-            print(
-                "Could not close VS Code."
+        try:
+            subprocess.Popen(
+                [
+                    executable,
+                    workspace_path,
+                ]
             )
 
+        except OSError as error:
+            print(
+                f"Could not start VS Code: {error}"
+            )
+            return None
+
+        # Wait for VS Code to create the workspace storage.
+        deadline = time.monotonic() + 10
+
+        while time.monotonic() < deadline:
+            storage = self.find_storage_by_path(
+                workspace_path
+            )
+
+            if storage:
+                return storage
+
+            time.sleep(0.25)
+
+        print(
+            "Timed out waiting for VS Code to create "
+            "destination workspace storage."
+        )
+
+        return None
+
+    # CHANGED:
+    # Close VS Code and wait until all VS Code processes have
+    # actually terminated before touching state.vscdb.
+    def close_vscode(self):
+        process_ids, error = (
+            self.platform.vscode_process_ids()
+        )
+
+        if error:
+            print(error)
             return False
 
-        # CHANGED:
-        # Give VS Code processes time to terminate
-        # and flush their database.
-        time.sleep(2)
+        if not process_ids:
+            return True
 
-        return True
+        success, error = (
+            self.platform.terminate_vscode()
+        )
+
+        if not success:
+            print(
+                error
+                or "Could not close VS Code."
+            )
+            return False
+
+        # Do not rely on a fixed sleep.
+        # VS Code can take different amounts of time to
+        # shut down depending on its current state.
+        deadline = time.monotonic() + 15
+
+        while time.monotonic() < deadline:
+            remaining_process_ids, inspection_error = (
+                self.platform.vscode_process_ids()
+            )
+
+            if inspection_error:
+                print(inspection_error)
+                return False
+
+            if not remaining_process_ids:
+                # Give the operating system a short moment to
+                # release file handles and SQLite locks.
+                time.sleep(0.25)
+                return True
+
+            time.sleep(0.25)
+
+        print(
+            "Timed out waiting for VS Code to terminate."
+        )
+
+        return False
 
     # CHANGED:
     # Open VS Code after raw state has been restored.
@@ -1687,37 +1961,43 @@ class VSCodeAdapter:
         self,
         workspace_path,
     ):
+        executable = self._code_executable()
 
-        subprocess.Popen(
-            [
-                "code",
-                workspace_path,
-            ]
-        )
+        if not executable:
+            return False
+
+        try:
+            subprocess.Popen(
+                [
+                    executable,
+                    workspace_path,
+                ]
+            )
+
+        except OSError as error:
+            print(
+                f"Could not start VS Code: {error}"
+            )
+            return False
+
+        return True
 
     def capture(self):
-
         # CHANGED:
         # Do not require process detection here.
         # VS Code's --status output and workspaceStorage database
         # are sufficient to identify the active workspace.
-        active_file = (
-            self.get_active_file()
-        )
+        active_file = self.get_active_file()
 
-        workspace = (
-            self.find_workspace_storage(
-                active_file
-            )
+        workspace = self.find_workspace_storage(
+            active_file
         )
 
         if not workspace:
             return None
 
-        editor_state_raw = (
-            self.get_editor_state(
-                workspace["state_db"]
-            )
+        editor_state_raw = self.get_editor_state(
+            workspace["state_db"]
         )
 
         editors = []
@@ -1729,7 +2009,6 @@ class VSCodeAdapter:
         }
 
         if editor_state_raw:
-
             parsed_editor_state = (
                 self.parse_editor_state(
                     editor_state_raw
@@ -1737,18 +2016,13 @@ class VSCodeAdapter:
             )
 
             if parsed_editor_state:
+                editors = parsed_editor_state[
+                    "editors"
+                ]
 
-                editors = (
-                    parsed_editor_state[
-                        "editors"
-                    ]
-                )
-
-                layout = (
-                    parsed_editor_state[
-                        "layout"
-                    ]
-                )
+                layout = parsed_editor_state[
+                    "layout"
+                ]
 
         text_editor_state_raw = (
             self.get_text_editor_state(
@@ -1759,7 +2033,6 @@ class VSCodeAdapter:
         parsed_text_editor_state = {}
 
         if text_editor_state_raw:
-
             parsed_text_editor_state = (
                 self.parse_text_editor_state(
                     text_editor_state_raw,
@@ -1771,36 +2044,27 @@ class VSCodeAdapter:
         files = []
 
         for editor in editors:
-
             path = editor["path"]
 
             file_data = {
-
                 "path": path,
-
                 "uri": editor["uri"],
-
                 "group": editor["group"],
-
                 "active": (
                     path == active_file
                 ),
             }
 
-            if (
-                path
-                in parsed_text_editor_state
-            ):
-
+            if path in parsed_text_editor_state:
                 file_data.update(
                     parsed_text_editor_state[
                         path
                     ]
                 )
 
-                file_data["group"] = (
-                    editor["group"]
-                )
+            file_data["group"] = editor[
+                "group"
+            ]
 
             files.append(
                 file_data
@@ -1813,7 +2077,6 @@ class VSCodeAdapter:
         #
         # Resolve the basename against the captured editors.
         if active_file:
-
             matching_active_files = [
                 file_data["path"]
                 for file_data in files
@@ -1825,7 +2088,6 @@ class VSCodeAdapter:
             if len(
                 matching_active_files
             ) == 1:
-
                 active_file = (
                     matching_active_files[0]
                 )
@@ -1834,12 +2096,9 @@ class VSCodeAdapter:
                 file_data["path"]
                 for file_data in files
             }:
-
-                # Already an absolute editor path.
                 pass
 
             else:
-
                 # CHANGED:
                 # Do not claim an ambiguous basename is active.
                 active_file = None
@@ -1848,7 +2107,6 @@ class VSCodeAdapter:
         # Recalculate the active flag after resolving the
         # absolute active-file path.
         for file_data in files:
-
             file_data["active"] = (
                 file_data["path"]
                 == active_file
@@ -1861,19 +2119,14 @@ class VSCodeAdapter:
         )
 
         for file_data in files:
-
             path = file_data["path"]
 
             if path in unsaved_changes:
-
                 file_data["unsaved"] = True
-
                 file_data["content"] = (
                     unsaved_changes[path]
                 )
-
             else:
-
                 file_data["unsaved"] = False
 
         if not files:
@@ -1882,25 +2135,18 @@ class VSCodeAdapter:
         # CHANGED:
         # Preserve raw VS Code state in the snapshot.
         return Snapshot(
-
             application="vscode",
-
             workspace={
                 "id": workspace[
                     "workspace_id"
                 ],
-
                 "path": workspace[
                     "workspace_path"
                 ],
             },
-
             files=files,
-
             layout=layout,
-
             active_file=active_file,
-
             editor_state=(
                 json.loads(
                     editor_state_raw
@@ -1908,11 +2154,9 @@ class VSCodeAdapter:
                 if editor_state_raw
                 else None
             ),
-
             text_editor_state=(
                 text_editor_state_raw
             ),
-
             # CHANGED:
             # Store the portable project tree in the snapshot.
             project=self.capture_project(
@@ -1929,18 +2173,15 @@ class VSCodeAdapter:
         self,
         snapshot_data,
     ):
-
         if not snapshot_data:
             return False
 
         if snapshot_data.get(
             "application"
         ) != "vscode":
-
             print(
                 "Snapshot is not a VS Code snapshot."
             )
-
             return False
 
         workspace = snapshot_data.get(
@@ -1948,11 +2189,9 @@ class VSCodeAdapter:
         )
 
         if not workspace:
-
             print(
                 "Snapshot does not contain a workspace."
             )
-
             return False
 
         source_workspace = workspace.get(
@@ -1960,28 +2199,11 @@ class VSCodeAdapter:
         )
 
         if not source_workspace:
-
             print(
                 "Snapshot does not contain a workspace path."
             )
-
             return False
 
-        source_workspace = (
-            self.normalize_workspace_path(
-                source_workspace
-            )
-        )
-
-        source_workspace = str(
-            Path(
-                source_workspace
-            ).resolve()
-        )
-
-        # CHANGED:
-        # Automatically map /home/<source-user>/... to the
-        # equivalent location under the current user's home.
         destination_path = (
             self.map_workspace_to_current_home(
                 source_workspace
@@ -1989,7 +2211,6 @@ class VSCodeAdapter:
         )
 
         if destination_path is None:
-
             print(
                 "Could not map the source workspace to "
                 "the current user's home directory:"
@@ -2045,9 +2266,7 @@ class VSCodeAdapter:
         )
 
         if destination_path.exists():
-
             if not destination_path.is_dir():
-
                 print(
                     "Destination workspace path exists "
                     "but is not a directory:"
@@ -2065,13 +2284,11 @@ class VSCodeAdapter:
             )
 
         else:
-
             project = snapshot_data.get(
                 "project"
             )
 
             if not project:
-
                 print(
                     "Destination project does not exist "
                     "and the snapshot does not contain "
@@ -2089,7 +2306,6 @@ class VSCodeAdapter:
                 project,
                 destination_workspace,
             ):
-
                 print(
                     "Could not recreate "
                     "destination project."
@@ -2099,8 +2315,28 @@ class VSCodeAdapter:
 
         # ======================================================
         # STEP 2
-        # Start VS Code once so it creates the
-        # destination workspace storage.
+        # CHANGED:
+        # Close any currently running VS Code BEFORE opening
+        # the destination workspace or modifying VS Code state.
+        # ======================================================
+
+        print(
+            "Checking for running VS Code processes..."
+        )
+
+        if not self.close_vscode():
+            print(
+                "Could not completely close VS Code "
+                "before restore."
+            )
+            return False
+
+        # ======================================================
+        # STEP 3
+        # Prepare destination workspace storage.
+        #
+        # If storage already exists, this does not launch
+        # another VS Code instance.
         # ======================================================
 
         print(
@@ -2114,7 +2350,6 @@ class VSCodeAdapter:
         )
 
         if not destination_storage:
-
             print(
                 "Could not locate destination "
                 "workspace storage."
@@ -2123,8 +2358,12 @@ class VSCodeAdapter:
             return False
 
         # ======================================================
-        # STEP 3
-        # Close VS Code before modifying state.vscdb.
+        # STEP 4
+        # Close VS Code again.
+        #
+        # This matters when prepare_destination_workspace()
+        # had to temporarily launch VS Code to create the
+        # workspace storage.
         # ======================================================
 
         print(
@@ -2135,7 +2374,7 @@ class VSCodeAdapter:
             return False
 
         # ======================================================
-        # STEP 4
+        # STEP 5
         # Locate destination storage again.
         # ======================================================
 
@@ -2146,7 +2385,6 @@ class VSCodeAdapter:
         )
 
         if not destination_storage:
-
             print(
                 "Destination workspace storage "
                 "could not be found."
@@ -2165,7 +2403,7 @@ class VSCodeAdapter:
         )
 
         # ======================================================
-        # STEP 5
+        # STEP 6
         # Remap source paths to destination paths.
         # ======================================================
 
@@ -2189,11 +2427,12 @@ class VSCodeAdapter:
             snapshot_copy.get(
                 "files",
                 [],
-            )
+            ),
+            destination_workspace,
         )
 
         # ======================================================
-        # STEP 6
+        # STEP 7
         # Write raw VS Code state.
         # ======================================================
 
@@ -2201,7 +2440,6 @@ class VSCodeAdapter:
             state_db,
             snapshot_copy,
         ):
-
             print(
                 "Could not restore VS Code state."
             )
@@ -2209,7 +2447,7 @@ class VSCodeAdapter:
             return False
 
         # ======================================================
-        # STEP 7
+        # STEP 8
         # Start VS Code again.
         # ======================================================
 
@@ -2217,9 +2455,10 @@ class VSCodeAdapter:
             "Starting restored VS Code workspace..."
         )
 
-        self.launch_restored_workspace(
+        if not self.launch_restored_workspace(
             destination_workspace
-        )
+        ):
+            return False
 
         print(
             "VS Code workspace restored successfully."
