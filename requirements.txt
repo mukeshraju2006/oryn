@@ -1,0 +1,7 @@
+fastapi
+uvicorn
+sqlalchemy
+psycopg[binary]
+PyJWT
+pwdlib[argon2]
+python-dotenv
