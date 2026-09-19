@@ -184,6 +184,7 @@ class OrynGUI:
             padx=5,
             pady=5
         )
+
         self.workspace_combo.bind(
             "<<ComboboxSelected>>",
             self.on_workspace_select
@@ -287,6 +288,7 @@ class OrynGUI:
             padx=5,
             pady=5
         )
+
         self.status_text.config(state=tk.DISABLED)
 
         self.dashboard_frame.rowconfigure(5, weight=1)
@@ -527,7 +529,8 @@ class OrynGUI:
 
         self.set_buttons_state(
             refresh_state=tk.DISABLED,
-            workspace_state=tk.DISABLED
+            workspace_state=tk.DISABLED,
+            snapshot_state=tk.DISABLED
         )
 
         thread = threading.Thread(
@@ -572,31 +575,46 @@ class OrynGUI:
             )
 
     def _finish_loading_snapshots(self):
+        # CHANGED:
+        # _update_snapshot_combo() already updates the Combobox.
+        # Avoid rebuilding it a second time.
         self._loading_snapshots = False
 
         self.set_buttons_state(
             refresh_state=tk.NORMAL,
-            workspace_state="readonly"
+            workspace_state="readonly",
+            snapshot_state="readonly"
         )
 
-        self._update_snapshot_combo()
-
     def _update_snapshot_combo(self):
+        # CHANGED:
+        # Rebuild the snapshot selector explicitly so Windows and
+        # Linux handle the ttk.Combobox consistently.
         self.snapshot_display_to_id.clear()
 
         snapshot_names = []
 
         for snap in self.snapshots:
-            display_name = (
-                f"Snapshot {snap['id']} "
-                f"(v{snap['version']})"
-            )
+            snapshot_id = snap.get("id")
+            version = snap.get("version")
+
+            if snapshot_id is None:
+                continue
+
+            display_name = f"Snapshot {snapshot_id} (v{version})"
+
             snapshot_names.append(display_name)
-            self.snapshot_display_to_id[display_name] = snap["id"]
+            self.snapshot_display_to_id[display_name] = snapshot_id
 
-        self.snapshot_combo["values"] = snapshot_names
+        # CHANGED:
+        # Clear the existing selection and values before replacing them.
+        self.snapshot_combo.set("")
+        self.snapshot_combo.configure(values=())
 
+        # CHANGED:
+        # Explicitly assign a tuple of values and select the first one.
         if snapshot_names:
+            self.snapshot_combo.configure(values=tuple(snapshot_names))
             self.snapshot_combo.current(0)
 
         self.log_status(
@@ -707,8 +725,7 @@ class OrynGUI:
             )
 
             # CHANGED:
-            # Do not call on_workspace_select() directly from
-            # the worker thread. Schedule it on Tkinter's main thread.
+            # Reload snapshots on the Tkinter main thread.
             self.root.after(
                 0,
                 self._reload_current_workspace_snapshots
@@ -978,8 +995,14 @@ class OrynGUI:
         self.snapshots = []
         self.snapshot_display_to_id.clear()
 
+        # CHANGED:
+        # Explicitly clear both Combobox value lists as well as
+        # their current selections.
         self.workspace_combo.set("")
+        self.workspace_combo.configure(values=())
+
         self.snapshot_combo.set("")
+        self.snapshot_combo.configure(values=())
 
         self.notebook.select(0)
 
