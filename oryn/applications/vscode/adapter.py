@@ -198,69 +198,6 @@ class VSCodeAdapter:
             "Install VS Code and make its command-line launcher available on PATH."
         )
 
-    def get_active_workspace_path(self):
-        # CHANGED:
-        # VS Code --status exposes the active workspace directory in
-        # the Process Argv line. This is more reliable than using an
-        # active filename because the same filename can exist in many
-        # workspace histories.
-        executable = self._code_executable()
-
-        try:
-            result = subprocess.run(
-                [
-                    executable,
-                    "--status",
-                ],
-                capture_output=True,
-                text=True,
-            )
-        except OSError as error:
-            print(f"Could not query VS Code status: {error}")
-            return None
-
-        if result.returncode != 0:
-            return None
-
-        for line in result.stdout.splitlines():
-            line = line.strip()
-
-            if not line.startswith("Process Argv:"):
-                continue
-
-            workspace_path = line.split(
-                "Process Argv:",
-                1,
-            )[1].strip()
-
-            if not workspace_path:
-                continue
-
-            # CHANGED:
-            # VS Code appends command-line flags to Process Argv.
-            # The workspace path is the first argument, and Windows
-            # paths may contain spaces, so split only at the beginning
-            # of a command-line option.
-            option_match = re.search(
-                r"\s+--[A-Za-z]",
-                workspace_path,
-            )
-
-            if option_match:
-                workspace_path = workspace_path[
-                    :option_match.start()
-                ].strip()
-
-            if not workspace_path:
-                continue
-
-            candidate = Path(workspace_path)
-
-            if candidate.is_dir():
-                return str(candidate)
-
-        return None
-
     def get_active_file(self):
         executable = self._code_executable()
 
@@ -390,13 +327,75 @@ class VSCodeAdapter:
                     return workspace
 
         if active_file:
+            # CHANGED:
+            # Match parsed full editor resources instead of searching the
+            # serialized database for a filename substring.
+            active_path = self._snapshot_path(active_file)
+            candidates = []
+
             for workspace in workspaces:
                 editor_state = self.get_editor_state(
                     workspace["state_db"]
                 )
+                parsed = self.parse_editor_state(editor_state)
+                if not parsed:
+                    continue
 
-                if editor_state and active_file in editor_state:
-                    return workspace
+                editor_paths = [
+                    editor["path"]
+                    for editor in parsed["editors"]
+                    if editor.get("path")
+                ]
+
+                if active_path is not None:
+                    exact = any(
+                        self._paths_equivalent(
+                            editor_path,
+                            active_path,
+                        )
+                        for editor_path in editor_paths
+                    )
+                    if exact:
+                        return workspace
+
+                active_name = str(active_path or active_file).replace(
+                    "\\", "/"
+                ).rsplit("/", 1)[-1]
+                if any(
+                    str(editor_path).replace("\\", "/").rsplit("/", 1)[-1]
+                    == active_name
+                    for editor_path in editor_paths
+                ):
+                    candidates.append(workspace)
+
+            if len(candidates) == 1:
+                return candidates[0]
+
+            if candidates:
+                # CHANGED:
+                # When --status supplies only a basename, prefer the
+                # workspace whose folder name is reported as active, then
+                # the most recently updated database. Never return the first
+                # historical database with the same filename.
+                active_folder = self._active_folder_name()
+                if active_folder:
+                    named = [
+                        workspace
+                        for workspace in candidates
+                        if self._workspace_basename(
+                            workspace["workspace_path"]
+                        ).casefold()
+                        == active_folder.casefold()
+                    ]
+                    if len(named) == 1:
+                        return named[0]
+
+                return max(
+                    candidates,
+                    key=lambda workspace: Path(
+                        workspace["state_db"]
+                    ).stat().st_mtime,
+                )
 
         executable = self._code_executable()
 
@@ -427,6 +426,35 @@ class VSCodeAdapter:
             return workspaces[0]
 
         return None
+
+    # CHANGED:
+    # Read the active folder label from --status only as a basename
+    # disambiguator; workspace paths are never taken from Process Argv.
+    def _active_folder_name(self):
+        executable = self._code_executable()
+        try:
+            status = subprocess.run(
+                [executable, "--status"],
+                capture_output=True,
+                text=True,
+            )
+        except OSError:
+            return None
+
+        if status.returncode != 0:
+            return None
+
+        for line in status.stdout.splitlines():
+            match = re.search(r"Folder \(([^)]+)\)", line.strip())
+            if match:
+                return match.group(1).strip()
+        return None
+
+    def _workspace_basename(self, workspace_path):
+        parsed = self._snapshot_path(workspace_path)
+        if parsed is None:
+            return ""
+        return parsed.name
 
     def get_editor_state(
         self,
@@ -2046,18 +2074,10 @@ class VSCodeAdapter:
         return True
 
     def capture(self):
-        # CHANGED:
-        # Identify the active workspace from VS Code --status first.
-        # The workspace path is authoritative and avoids selecting an
-        # unrelated workspace whose history contains the same filename.
-        active_workspace_path = (
-            self.get_active_workspace_path()
-        )
         active_file = self.get_active_file()
 
         workspace = self.find_workspace_storage(
             active_file=active_file,
-            workspace_path=active_workspace_path,
         )
 
         if not workspace:

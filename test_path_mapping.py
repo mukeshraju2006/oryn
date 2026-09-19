@@ -17,6 +17,37 @@ from oryn.cloud.session import get_session_file
 
 class VSCodePlatformTests(unittest.TestCase):
 
+    def test_workspace_detection_uses_full_editor_paths(self):
+        adapter = VSCodeAdapter()
+        workspace_a = {
+            "workspace_id": "a",
+            "workspace_path": "file:///C:/Users/mukes/project",
+            "state_db": "C:/state-a.vscdb",
+        }
+        workspace_b = {
+            "workspace_id": "b",
+            "workspace_path": "file:///c%3A/Users/mukes/Frontend/assignment3",
+            "state_db": "C:/state-b.vscdb",
+        }
+
+        def parsed_state(state_db):
+            # CHANGED: Model serializedGrid output with identical basenames
+            # in different historical workspace databases.
+            path = (
+                "C:/Users/mukes/project/src/main.ts"
+                if state_db == "C:/state-a.vscdb"
+                else "C:/Users/mukes/Frontend/assignment3/src/main.ts"
+            )
+            return {"editors": [{"path": path}], "layout": {}}
+
+        with patch.object(adapter, "get_workspace_storages", return_value=[workspace_a, workspace_b]), \
+             patch.object(adapter, "get_editor_state", side_effect=lambda state_db: state_db), \
+             patch.object(adapter, "parse_editor_state", side_effect=parsed_state), \
+             patch.object(adapter, "_active_folder_name", return_value="assignment3"):
+            selected = adapter.find_workspace_storage(active_file="main.ts")
+
+        self.assertEqual(selected["workspace_id"], "b")
+
     def test_linux_executable_lookup(self):
         platform = VSCodePlatform(
             platform_name="linux",
