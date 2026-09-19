@@ -202,6 +202,9 @@ class VSCodeAdapter:
         executable = self._code_executable()
 
         try:
+            # CHANGED:
+            # Explicitly decode VS Code --status as UTF-8 and replace
+            # malformed bytes instead of using Windows' cp1252 default.
             result = subprocess.run(
                 [
                     executable,
@@ -209,6 +212,8 @@ class VSCodeAdapter:
                 ],
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
             )
         except OSError as error:
             print(f"Could not query VS Code status: {error}")
@@ -400,6 +405,10 @@ class VSCodeAdapter:
         executable = self._code_executable()
 
         try:
+            # CHANGED:
+            # VS Code --status can contain bytes that Windows cp1252
+            # cannot decode. Explicit UTF-8 decoding prevents capture
+            # from failing in subprocess' reader thread.
             status = subprocess.run(
                 [
                     executable,
@@ -407,6 +416,8 @@ class VSCodeAdapter:
                 ],
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
             )
         except OSError:
             status = None
@@ -433,10 +444,15 @@ class VSCodeAdapter:
     def _active_folder_name(self):
         executable = self._code_executable()
         try:
+            # CHANGED:
+            # Explicitly decode VS Code status output as UTF-8 so malformed
+            # diagnostic bytes cannot terminate the capture operation.
             status = subprocess.run(
                 [executable, "--status"],
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
             )
         except OSError:
             return None
@@ -879,6 +895,7 @@ class VSCodeAdapter:
             "build",
             ".next",
             ".cache",
+            ".angular"
         }
 
         # CHANGED:
