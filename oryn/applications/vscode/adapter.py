@@ -198,6 +198,69 @@ class VSCodeAdapter:
             "Install VS Code and make its command-line launcher available on PATH."
         )
 
+    def get_active_workspace_path(self):
+        # CHANGED:
+        # VS Code --status exposes the active workspace directory in
+        # the Process Argv line. This is more reliable than using an
+        # active filename because the same filename can exist in many
+        # workspace histories.
+        executable = self._code_executable()
+
+        try:
+            result = subprocess.run(
+                [
+                    executable,
+                    "--status",
+                ],
+                capture_output=True,
+                text=True,
+            )
+        except OSError as error:
+            print(f"Could not query VS Code status: {error}")
+            return None
+
+        if result.returncode != 0:
+            return None
+
+        for line in result.stdout.splitlines():
+            line = line.strip()
+
+            if not line.startswith("Process Argv:"):
+                continue
+
+            workspace_path = line.split(
+                "Process Argv:",
+                1,
+            )[1].strip()
+
+            if not workspace_path:
+                continue
+
+            # CHANGED:
+            # VS Code appends command-line flags to Process Argv.
+            # The workspace path is the first argument, and Windows
+            # paths may contain spaces, so split only at the beginning
+            # of a command-line option.
+            option_match = re.search(
+                r"\s+--[A-Za-z]",
+                workspace_path,
+            )
+
+            if option_match:
+                workspace_path = workspace_path[
+                    :option_match.start()
+                ].strip()
+
+            if not workspace_path:
+                continue
+
+            candidate = Path(workspace_path)
+
+            if candidate.is_dir():
+                return str(candidate)
+
+        return None
+
     def get_active_file(self):
         executable = self._code_executable()
 
@@ -1984,13 +2047,17 @@ class VSCodeAdapter:
 
     def capture(self):
         # CHANGED:
-        # Do not require process detection here.
-        # VS Code's --status output and workspaceStorage database
-        # are sufficient to identify the active workspace.
+        # Identify the active workspace from VS Code --status first.
+        # The workspace path is authoritative and avoids selecting an
+        # unrelated workspace whose history contains the same filename.
+        active_workspace_path = (
+            self.get_active_workspace_path()
+        )
         active_file = self.get_active_file()
 
         workspace = self.find_workspace_storage(
-            active_file
+            active_file=active_file,
+            workspace_path=active_workspace_path,
         )
 
         if not workspace:
