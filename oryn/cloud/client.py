@@ -6,7 +6,7 @@ class CloudClient:
 
     def __init__(
         self,
-        base_url="http://127.0.0.1:8000",
+        base_url="https://oryn-navy.vercel.app",
         token=None,
     ):
         self.base_url = base_url.rstrip("/")
