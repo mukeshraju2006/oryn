@@ -34,3 +34,8 @@ htmlcov/
 *.db
 *.sqlite
 *.sqlite3
+
+# PyInstaller
+build/
+dist/
+*.spec
