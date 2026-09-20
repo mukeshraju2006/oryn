@@ -685,6 +685,11 @@ class VSCodeAdapter:
                 if matching_open_path is None:
                     continue
 
+                per_group = result.setdefault(
+                    matching_open_path,
+                    {},
+                )
+
                 for (
                     group_id,
                     editor_state,
@@ -716,7 +721,7 @@ class VSCodeAdapter:
                     )
 
                     selection_end = cursor.get(
-                        "position",
+                        "selectionEnd",
                         {},
                     )
 
@@ -725,7 +730,11 @@ class VSCodeAdapter:
                         {},
                     )
 
-                    result[matching_open_path] = {
+                    # CHANGED:
+                    # Preserve editor state by group so the same file can
+                    # exist in multiple groups without overwriting one
+                    # another when the path matches exactly.
+                    per_group[int(group_id)] = {
                         "group": int(
                             group_id
                         ),
@@ -2159,11 +2168,17 @@ class VSCodeAdapter:
                 ),
             }
 
-            if path in parsed_text_editor_state:
+            group_state = parsed_text_editor_state.get(
+                path,
+                {},
+            ).get(
+                editor["group"],
+                {},
+            )
+
+            if group_state:
                 file_data.update(
-                    parsed_text_editor_state[
-                        path
-                    ]
+                    group_state
                 )
 
             file_data["group"] = editor[

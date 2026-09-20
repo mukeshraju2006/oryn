@@ -259,6 +259,59 @@ class CrossPlatformPathTests(unittest.TestCase):
             remapped["text_editor_state"],
         )
 
+    def test_parse_text_editor_state_keeps_duplicate_files_across_groups(self):
+        text_editor_state = {
+            "textEditorViewState": [
+                [
+                    "file:///tmp/project/LICENSE",
+                    {
+                        "0": {
+                            "cursorState": [{
+                                "position": {"lineNumber": 1, "column": 2},
+                                "selectionStart": {"lineNumber": 1, "column": 1},
+                            }],
+                            "viewState": {
+                                "firstPosition": {"lineNumber": 1, "column": 1},
+                                "scrollLeft": 0,
+                            },
+                        },
+                        "1": {
+                            "cursorState": [{
+                                "position": {"lineNumber": 9, "column": 4},
+                                "selectionStart": {"lineNumber": 9, "column": 3},
+                            }],
+                            "viewState": {
+                                "firstPosition": {"lineNumber": 7, "column": 3},
+                                "scrollLeft": 0,
+                            },
+                        },
+                    },
+                ],
+            ],
+        }
+
+        open_editors = [
+            {"path": "/tmp/project/LICENSE", "group": 0},
+            {"path": "/tmp/project/LICENSE", "group": 1},
+            {"path": "/tmp/project/AGENTS.md", "group": 1},
+        ]
+
+        result = self.adapter.parse_text_editor_state(
+            text_editor_state,
+            open_editors,
+        )
+
+        self.assertIn("/tmp/project/LICENSE", result)
+        self.assertEqual(set(result["/tmp/project/LICENSE"].keys()), {0, 1})
+        self.assertEqual(
+            result["/tmp/project/LICENSE"][0]["cursor"]["line"],
+            1,
+        )
+        self.assertEqual(
+            result["/tmp/project/LICENSE"][1]["cursor"]["line"],
+            9,
+        )
+
     def test_windows_to_linux_remapping(self):
         snapshot = {
             "workspace": {"path": "file:///C:/Users/Alice/project"},
