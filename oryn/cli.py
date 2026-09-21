@@ -2,6 +2,7 @@ import getpass
 import sys
 
 from oryn.applications.vscode.adapter import VSCodeAdapter
+from oryn.applications.browsers.adapter import BrowserAdapter  # CHANGED
 from oryn.cloud.client import CloudClient
 from oryn.cloud.session import load_token, save_token
 
@@ -141,6 +142,21 @@ def capture():
             "Could not capture current VS Code session."
         )
         return
+
+    # CHANGED:
+    # Capture URLs from browsers that are already open.
+    # Oryn does not start the browser or use CDP during capture.
+    browser_adapter = BrowserAdapter()
+    browser_urls = browser_adapter.capture_urls()
+
+    # CHANGED:
+    # Attach the browser URLs to the existing snapshot
+    # before uploading it to the cloud.
+    snapshot.browser_urls = browser_urls
+
+    print(
+        f"Captured {len(browser_urls)} browser URL(s)."
+    )
 
     try:
         result = client.create_snapshot(

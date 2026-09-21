@@ -4,18 +4,29 @@ import threading
 import tkinter as tk
 from tkinter import ttk
 
+
 # Try relative imports first (when run as part of the oryn package)
 try:
     from ..cloud.client import CloudClient
     from ..cloud.session import load_token, save_token
     from ..applications.vscode.adapter import VSCodeAdapter
+    from ..applications.browsers.adapter import BrowserAdapter  # CHANGED
 except ImportError:
     # Fallback for when the module is run directly (e.g., python gui/app.py)
     # Add the project root to the path so we can import oryn
-    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    sys.path.insert(
+        0,
+        os.path.dirname(
+            os.path.dirname(
+                os.path.abspath(__file__)
+            )
+        )
+    )
+
     from oryn.cloud.client import CloudClient
     from oryn.cloud.session import load_token, save_token
     from oryn.applications.vscode.adapter import VSCodeAdapter
+    from oryn.applications.browsers.adapter import BrowserAdapter  # CHANGED
 
 
 class OrynGUI:
@@ -44,31 +55,49 @@ class OrynGUI:
 
         # Create a notebook (tabbed interface) for login/register and main dashboard
         self.notebook = ttk.Notebook(root)
-        self.notebook.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        self.notebook.pack(
+            fill=tk.BOTH,
+            expand=True,
+            padx=10,
+            pady=10
+        )
 
         # Login frame
         self.login_frame = ttk.Frame(self.notebook)
-        self.notebook.add(self.login_frame, text="Login")
+        self.notebook.add(
+            self.login_frame,
+            text="Login"
+        )
         self.create_login_widgets()
 
         # Register frame
         self.register_frame = ttk.Frame(self.notebook)
-        self.notebook.add(self.register_frame, text="Register")
+        self.notebook.add(
+            self.register_frame,
+            text="Register"
+        )
         self.create_register_widgets()
 
         # Main dashboard frame
         self.dashboard_frame = ttk.Frame(self.notebook)
-        self.notebook.add(self.dashboard_frame, text="Dashboard")
+        self.notebook.add(
+            self.dashboard_frame,
+            text="Dashboard"
+        )
         self.create_dashboard_widgets()
 
         # If we have a token, try to load user data
         self.token = load_token()
 
         if self.token:
-            self.client = CloudClient(token=self.token)
+            self.client = CloudClient(
+                token=self.token
+            )
             self.notebook.select(2)
 
-            self.log_status("Validating session...")
+            self.log_status(
+                "Validating session..."
+            )
             self.load_user_data()
         else:
             self.notebook.select(0)
@@ -77,77 +106,139 @@ class OrynGUI:
         ttk.Label(
             self.login_frame,
             text="Email:"
-        ).grid(row=0, column=0, padx=5, pady=5, sticky=tk.W)
+        ).grid(
+            row=0,
+            column=0,
+            padx=5,
+            pady=5,
+            sticky=tk.W
+        )
 
         self.login_email = ttk.Entry(
             self.login_frame,
             width=30
         )
-        self.login_email.grid(row=0, column=1, padx=5, pady=5)
+        self.login_email.grid(
+            row=0,
+            column=1,
+            padx=5,
+            pady=5
+        )
 
         ttk.Label(
             self.login_frame,
             text="Password:"
-        ).grid(row=1, column=0, padx=5, pady=5, sticky=tk.W)
+        ).grid(
+            row=1,
+            column=0,
+            padx=5,
+            pady=5,
+            sticky=tk.W
+        )
 
         self.login_password = ttk.Entry(
             self.login_frame,
             width=30,
             show="*"
         )
-        self.login_password.grid(row=1, column=1, padx=5, pady=5)
+        self.login_password.grid(
+            row=1,
+            column=1,
+            padx=5,
+            pady=5
+        )
 
         self.login_button = ttk.Button(
             self.login_frame,
             text="Login",
             command=self.login
         )
-        self.login_button.grid(row=2, column=0, columnspan=2, pady=10)
+        self.login_button.grid(
+            row=2,
+            column=0,
+            columnspan=2,
+            pady=10
+        )
 
         self.login_status = ttk.Label(
             self.login_frame,
             text="",
             foreground="red"
         )
-        self.login_status.grid(row=3, column=0, columnspan=2)
+        self.login_status.grid(
+            row=3,
+            column=0,
+            columnspan=2
+        )
 
     def create_register_widgets(self):
         ttk.Label(
             self.register_frame,
             text="Email:"
-        ).grid(row=0, column=0, padx=5, pady=5, sticky=tk.W)
+        ).grid(
+            row=0,
+            column=0,
+            padx=5,
+            pady=5,
+            sticky=tk.W
+        )
 
         self.register_email = ttk.Entry(
             self.register_frame,
             width=30
         )
-        self.register_email.grid(row=0, column=1, padx=5, pady=5)
+        self.register_email.grid(
+            row=0,
+            column=1,
+            padx=5,
+            pady=5
+        )
 
         ttk.Label(
             self.register_frame,
             text="Password:"
-        ).grid(row=1, column=0, padx=5, pady=5, sticky=tk.W)
+        ).grid(
+            row=1,
+            column=0,
+            padx=5,
+            pady=5,
+            sticky=tk.W
+        )
 
         self.register_password = ttk.Entry(
             self.register_frame,
             width=30,
             show="*"
         )
-        self.register_password.grid(row=1, column=1, padx=5, pady=5)
+        self.register_password.grid(
+            row=1,
+            column=1,
+            padx=5,
+            pady=5
+        )
 
         self.register_button = ttk.Button(
             self.register_frame,
             text="Register",
             command=self.register
         )
-        self.register_button.grid(row=2, column=0, columnspan=2, pady=10)
+        self.register_button.grid(
+            row=2,
+            column=0,
+            columnspan=2,
+            pady=10
+        )
 
         self.register_status = ttk.Label(
             self.register_frame,
             text="",
             foreground="red"
         )
-        self.register_status.grid(row=3, column=0, columnspan=2)
+        self.register_status.grid(
+            row=3,
+            column=0,
+            columnspan=2
+        )
 
     def create_dashboard_widgets(self):
         self.welcome_label = ttk.Label(
@@ -213,7 +304,9 @@ class OrynGUI:
             pady=5
         )
 
-        buttons_frame = ttk.Frame(self.dashboard_frame)
+        buttons_frame = ttk.Frame(
+            self.dashboard_frame
+        )
         buttons_frame.grid(
             row=3,
             column=0,
@@ -289,16 +382,33 @@ class OrynGUI:
             pady=5
         )
 
-        self.status_text.config(state=tk.DISABLED)
+        self.status_text.config(
+            state=tk.DISABLED
+        )
 
-        self.dashboard_frame.rowconfigure(5, weight=1)
-        self.dashboard_frame.columnconfigure(0, weight=1)
+        self.dashboard_frame.rowconfigure(
+            5,
+            weight=1
+        )
+        self.dashboard_frame.columnconfigure(
+            0,
+            weight=1
+        )
 
     def log_status(self, message):
-        self.status_text.config(state=tk.NORMAL)
-        self.status_text.insert(tk.END, message + "\n")
-        self.status_text.see(tk.END)
-        self.status_text.config(state=tk.DISABLED)
+        self.status_text.config(
+            state=tk.NORMAL
+        )
+        self.status_text.insert(
+            tk.END,
+            message + "\n"
+        )
+        self.status_text.see(
+            tk.END
+        )
+        self.status_text.config(
+            state=tk.DISABLED
+        )
         self.root.update_idletasks()
 
     def set_buttons_state(
@@ -310,19 +420,29 @@ class OrynGUI:
         snapshot_state=None
     ):
         if capture_state is not None:
-            self.capture_button.config(state=capture_state)
+            self.capture_button.config(
+                state=capture_state
+            )
 
         if restore_state is not None:
-            self.restore_button.config(state=restore_state)
+            self.restore_button.config(
+                state=restore_state
+            )
 
         if refresh_state is not None:
-            self.refresh_button.config(state=refresh_state)
+            self.refresh_button.config(
+                state=refresh_state
+            )
 
         if workspace_state is not None:
-            self.workspace_combo.config(state=workspace_state)
+            self.workspace_combo.config(
+                state=workspace_state
+            )
 
         if snapshot_state is not None:
-            self.snapshot_combo.config(state=snapshot_state)
+            self.snapshot_combo.config(
+                state=snapshot_state
+            )
 
     def login(self):
         email = self.login_email.get().strip()
@@ -334,8 +454,12 @@ class OrynGUI:
             )
             return
 
-        self.login_button.config(state=tk.DISABLED)
-        self.login_status.config(text="Logging in...")
+        self.login_button.config(
+            state=tk.DISABLED
+        )
+        self.login_status.config(
+            text="Logging in..."
+        )
 
         thread = threading.Thread(
             target=self._login_thread,
@@ -347,16 +471,30 @@ class OrynGUI:
     def _login_thread(self, email, password):
         try:
             temp_client = CloudClient()
-            result = temp_client.login(email, password)
+
+            result = temp_client.login(
+                email,
+                password
+            )
 
             self.token = result["access_token"]
-            save_token(self.token)
-            self.client = CloudClient(token=self.token)
 
-            self.root.after(0, self._login_success)
+            save_token(
+                self.token
+            )
+
+            self.client = CloudClient(
+                token=self.token
+            )
+
+            self.root.after(
+                0,
+                self._login_success
+            )
 
         except Exception as e:
             error_message = str(e)  # CHANGED
+
             self.root.after(
                 0,
                 self._login_failed,
@@ -364,16 +502,22 @@ class OrynGUI:
             )
 
     def _login_success(self):
-        self.login_status.config(text="Login successful!")
+        self.login_status.config(
+            text="Login successful!"
+        )
         self.notebook.select(2)
         self.load_user_data()
-        self.login_button.config(state=tk.NORMAL)
+        self.login_button.config(
+            state=tk.NORMAL
+        )
 
     def _login_failed(self, error_msg):
         self.login_status.config(
             text=f"Login failed: {error_msg}"
         )
-        self.login_button.config(state=tk.NORMAL)
+        self.login_button.config(
+            state=tk.NORMAL
+        )
 
     def register(self):
         email = self.register_email.get().strip()
@@ -385,8 +529,12 @@ class OrynGUI:
             )
             return
 
-        self.register_button.config(state=tk.DISABLED)
-        self.register_status.config(text="Registering...")
+        self.register_button.config(
+            state=tk.DISABLED
+        )
+        self.register_status.config(
+            text="Registering..."
+        )
 
         thread = threading.Thread(
             target=self._register_thread,
@@ -398,16 +546,30 @@ class OrynGUI:
     def _register_thread(self, email, password):
         try:
             temp_client = CloudClient()
-            result = temp_client.register(email, password)
+
+            result = temp_client.register(
+                email,
+                password
+            )
 
             self.token = result["access_token"]
-            save_token(self.token)
-            self.client = CloudClient(token=self.token)
 
-            self.root.after(0, self._register_success)
+            save_token(
+                self.token
+            )
+
+            self.client = CloudClient(
+                token=self.token
+            )
+
+            self.root.after(
+                0,
+                self._register_success
+            )
 
         except Exception as e:
             error_message = str(e)  # CHANGED
+
             self.root.after(
                 0,
                 self._register_failed,
@@ -420,16 +582,22 @@ class OrynGUI:
         )
         self.notebook.select(2)
         self.load_user_data()
-        self.register_button.config(state=tk.NORMAL)
+        self.register_button.config(
+            state=tk.NORMAL
+        )
 
     def _register_failed(self, error_msg):
         self.register_status.config(
             text=f"Registration failed: {error_msg}"
         )
-        self.register_button.config(state=tk.NORMAL)
+        self.register_button.config(
+            state=tk.NORMAL
+        )
 
     def load_user_data(self):
-        self.log_status("Loading workspaces...")
+        self.log_status(
+            "Loading workspaces..."
+        )
 
         self._loading_workspaces = True
 
@@ -456,6 +624,7 @@ class OrynGUI:
                 return
 
             workspaces = self.client.list_workspaces()
+
             self.workspaces = workspaces
 
             self.root.after(
@@ -465,6 +634,7 @@ class OrynGUI:
 
         except Exception as e:
             error_message = str(e)  # CHANGED
+
             self.root.after(
                 0,
                 self.log_status,
@@ -494,8 +664,14 @@ class OrynGUI:
 
         for ws in self.workspaces:
             display_name = ws["name"]
-            workspace_names.append(display_name)
-            self.workspace_display_to_id[display_name] = ws["id"]
+
+            workspace_names.append(
+                display_name
+            )
+
+            self.workspace_display_to_id[
+                display_name
+            ] = ws["id"]
 
         self.workspace_combo["values"] = workspace_names
 
@@ -516,7 +692,9 @@ class OrynGUI:
         if not selection:
             return
 
-        workspace_id = self.workspace_display_to_id.get(selection)
+        workspace_id = self.workspace_display_to_id.get(
+            selection
+        )
 
         if not workspace_id:
             return
@@ -553,6 +731,7 @@ class OrynGUI:
             snapshots = self.client.list_snapshots(
                 workspace_id=workspace_id
             )
+
             self.snapshots = snapshots
 
             self.root.after(
@@ -562,6 +741,7 @@ class OrynGUI:
 
         except Exception as e:
             error_message = str(e)  # CHANGED
+
             self.root.after(
                 0,
                 self.log_status,
@@ -601,20 +781,31 @@ class OrynGUI:
             if snapshot_id is None:
                 continue
 
-            display_name = f"Snapshot {snapshot_id} (v{version})"
+            display_name = (
+                f"Snapshot {snapshot_id} (v{version})"
+            )
 
-            snapshot_names.append(display_name)
-            self.snapshot_display_to_id[display_name] = snapshot_id
+            snapshot_names.append(
+                display_name
+            )
+
+            self.snapshot_display_to_id[
+                display_name
+            ] = snapshot_id
 
         # CHANGED:
         # Clear the existing selection and values before replacing them.
         self.snapshot_combo.set("")
-        self.snapshot_combo.configure(values=())
+        self.snapshot_combo.configure(
+            values=()
+        )
 
         # CHANGED:
         # Explicitly assign a tuple of values and select the first one.
         if snapshot_names:
-            self.snapshot_combo.configure(values=tuple(snapshot_names))
+            self.snapshot_combo.configure(
+                values=tuple(snapshot_names)
+            )
             self.snapshot_combo.current(0)
 
         self.log_status(
@@ -625,7 +816,9 @@ class OrynGUI:
         if self._capture_in_progress:
             return
 
-        self.log_status("Starting workspace capture...")
+        self.log_status(
+            "Starting workspace capture..."
+        )
 
         self._capture_in_progress = True
 
@@ -652,6 +845,7 @@ class OrynGUI:
                 return
 
             adapter = VSCodeAdapter()
+
             snapshot = adapter.capture()
 
             if not snapshot:
@@ -661,6 +855,26 @@ class OrynGUI:
                     "Capture failed: No snapshot generated"
                 )
                 return
+
+            # CHANGED:
+            # Capture URLs from browsers that are already open.
+            # Oryn does not start the browser or use CDP during capture.
+            browser_adapter = BrowserAdapter()
+
+            browser_urls = (
+                browser_adapter.capture_urls()
+            )
+
+            # CHANGED:
+            # Attach the captured browser URLs to the existing
+            # workspace snapshot before uploading it to the cloud.
+            snapshot.browser_urls = browser_urls
+
+            self.root.after(
+                0,
+                self.log_status,
+                f"Captured {len(browser_urls)} browser URL(s)"
+            )
 
             # CHANGED:
             # Read the selected workspace on the main thread.
@@ -682,7 +896,10 @@ class OrynGUI:
                     "name": workspace_name
                 }
 
-                self.workspaces.append(new_workspace)
+                self.workspaces.append(
+                    new_workspace
+                )
+
                 self.workspace_display_to_id[
                     workspace_name
                 ] = workspace_id
@@ -693,8 +910,10 @@ class OrynGUI:
                 )
 
             else:
-                workspace_id = self.workspace_display_to_id.get(
-                    workspace_selection
+                workspace_id = (
+                    self.workspace_display_to_id.get(
+                        workspace_selection
+                    )
                 )
 
                 if not workspace_id:
@@ -733,6 +952,7 @@ class OrynGUI:
 
         except Exception as e:
             error_message = str(e)  # CHANGED
+
             self.root.after(
                 0,
                 self.log_status,
@@ -829,8 +1049,10 @@ class OrynGUI:
                 )
                 return
 
-            workspace_id = self.workspace_display_to_id.get(
-                workspace_selection
+            workspace_id = (
+                self.workspace_display_to_id.get(
+                    workspace_selection
+                )
             )
 
             if not workspace_id:
@@ -855,15 +1077,48 @@ class OrynGUI:
                 return
 
             adapter = VSCodeAdapter()
-            success = adapter.restore(snapshot)
+
+            success = adapter.restore(
+                snapshot
+            )
 
             if success:
+                # CHANGED:
+                # Restore the browser URLs saved in the snapshot.
+                # Browser processes are only opened during restore.
+                if isinstance(snapshot, dict):
+                    browser_urls = snapshot.get(
+                        "browser_urls",
+                        []
+                    )
+                else:
+                    browser_urls = getattr(
+                        snapshot,
+                        "browser_urls",
+                        []
+                    )
+
+                browser_adapter = BrowserAdapter()
+
+                restored_browser_count = (
+                    browser_adapter.restore_urls(
+                        browser_urls
+                    )
+                )
+
+                self.root.after(
+                    0,
+                    self.log_status,
+                    f"Opened {restored_browser_count} browser URL(s)"
+                )
+
                 self.root.after(
                     0,
                     self.log_status,
                     f"Restore successful! "
                     f"Workspace restored from snapshot {snapshot_id}"
                 )
+
             else:
                 self.root.after(
                     0,
@@ -899,7 +1154,10 @@ class OrynGUI:
         )
 
     def refresh_workspaces(self):
-        if self._loading_workspaces or self._loading_snapshots:
+        if (
+            self._loading_workspaces
+            or self._loading_snapshots
+        ):
             return
 
         self.log_status(
@@ -999,10 +1257,14 @@ class OrynGUI:
         # Explicitly clear both Combobox value lists as well as
         # their current selections.
         self.workspace_combo.set("")
-        self.workspace_combo.configure(values=())
+        self.workspace_combo.configure(
+            values=()
+        )
 
         self.snapshot_combo.set("")
-        self.snapshot_combo.configure(values=())
+        self.snapshot_combo.configure(
+            values=()
+        )
 
         self.notebook.select(0)
 
