@@ -11,6 +11,7 @@ try:
     from ..cloud.session import load_token, save_token
     from ..applications.vscode.adapter import VSCodeAdapter
     from ..applications.browsers.adapter import BrowserAdapter  # CHANGED
+    from ..core.snapshot import Snapshot  # CHANGED
 except ImportError:
     # Fallback for when the module is run directly (e.g., python gui/app.py)
     # Add the project root to the path so we can import oryn
@@ -27,6 +28,7 @@ except ImportError:
     from oryn.cloud.session import load_token, save_token
     from oryn.applications.vscode.adapter import VSCodeAdapter
     from oryn.applications.browsers.adapter import BrowserAdapter  # CHANGED
+    from oryn.core.snapshot import Snapshot  # CHANGED
 
 
 class OrynGUI:
@@ -844,21 +846,15 @@ class OrynGUI:
                 )
                 return
 
-            adapter = VSCodeAdapter()
+            # CHANGED:
+            # VS Code and browser capture are independent.
+            vscode_adapter = VSCodeAdapter()
 
-            snapshot = adapter.capture()
-
-            if not snapshot:
-                self.root.after(
-                    0,
-                    self.log_status,
-                    "Capture failed: No snapshot generated"
-                )
-                return
+            snapshot = vscode_adapter.capture()
 
             # CHANGED:
-            # Capture URLs from browsers that are already open.
-            # Oryn does not start the browser or use CDP during capture.
+            # Browser capture must happen even when VS Code
+            # is not running.
             browser_adapter = BrowserAdapter()
 
             browser_urls = (
@@ -866,9 +862,34 @@ class OrynGUI:
             )
 
             # CHANGED:
-            # Attach the captured browser URLs to the existing
-            # workspace snapshot before uploading it to the cloud.
-            snapshot.browser_urls = browser_urls
+            # If VS Code is available, attach browser URLs
+            # to the existing VS Code snapshot.
+            if snapshot is not None:
+                snapshot.browser_urls = browser_urls
+
+            # CHANGED:
+            # If VS Code is not available but the browser is,
+            # create a minimal browser-only snapshot.
+            elif browser_urls:
+                snapshot = Snapshot(
+                    application="browser",
+                    workspace={},
+                    files=[],
+                    layout={},
+                    active_file=None,
+                    browser_urls=browser_urls,
+                )
+
+            # CHANGED:
+            # Capture fails only when neither supported
+            # application produced any state.
+            if snapshot is None:
+                self.root.after(
+                    0,
+                    self.log_status,
+                    "Capture failed: No supported application is open"
+                )
+                return
 
             self.root.after(
                 0,
@@ -876,8 +897,7 @@ class OrynGUI:
                 f"Captured {len(browser_urls)} browser URL(s)"
             )
 
-            # CHANGED:
-            # Read the selected workspace on the main thread.
+            # Read the selected workspace.
             workspace_selection = self.workspace_combo.get()
 
             if not workspace_selection:
@@ -943,8 +963,6 @@ class OrynGUI:
                 f"Version: {result['version']}"
             )
 
-            # CHANGED:
-            # Reload snapshots on the Tkinter main thread.
             self.root.after(
                 0,
                 self._reload_current_workspace_snapshots
@@ -1037,7 +1055,6 @@ class OrynGUI:
                 )
                 return
 
-            # CHANGED:
             # Capture GUI state before performing background work.
             workspace_selection = self.workspace_combo.get()
 
@@ -1076,28 +1093,45 @@ class OrynGUI:
                 )
                 return
 
-            adapter = VSCodeAdapter()
+            # CHANGED:
+            # Determine the application stored in the snapshot.
+            if isinstance(snapshot, dict):
+                application = snapshot.get(
+                    "application"
+                )
 
-            success = adapter.restore(
-                snapshot
-            )
+                browser_urls = snapshot.get(
+                    "browser_urls",
+                    []
+                )
+            else:
+                application = getattr(
+                    snapshot,
+                    "application",
+                    None
+                )
+
+                browser_urls = getattr(
+                    snapshot,
+                    "browser_urls",
+                    []
+                )
+
+            # CHANGED:
+            # VS Code restoration is optional.
+            # Browser-only snapshots must not require VS Code.
+            success = True
+
+            if application == "vscode":
+                vscode_adapter = VSCodeAdapter()
+
+                success = vscode_adapter.restore(
+                    snapshot
+                )
 
             if success:
                 # CHANGED:
-                # Restore the browser URLs saved in the snapshot.
-                # Browser processes are only opened during restore.
-                if isinstance(snapshot, dict):
-                    browser_urls = snapshot.get(
-                        "browser_urls",
-                        []
-                    )
-                else:
-                    browser_urls = getattr(
-                        snapshot,
-                        "browser_urls",
-                        []
-                    )
-
+                # Browser restoration is independent of VS Code.
                 browser_adapter = BrowserAdapter()
 
                 restored_browser_count = (
@@ -1123,13 +1157,13 @@ class OrynGUI:
                 self.root.after(
                     0,
                     self.log_status,
-                    "Restore failed: Adapter returned false"
+                    "Restore failed: VS Code restoration failed"
                 )
 
         except Exception as e:
             # CHANGED:
             # Convert exception to a normal string BEFORE leaving
-            # the except block. Never close over `e` in a delayed lambda.
+            # the except block.
             error_message = str(e)
 
             self.root.after(

@@ -3,12 +3,13 @@ from oryn.applications.browsers.adapter import BrowserAdapter
 
 adapter = BrowserAdapter()
 
-adapter.start_browser()
-
-print("Chrome started.")
+print("Chrome must already be open.")
 
 print("\nOpen URLs:")
 
-for url in adapter.capture_urls():
+urls = adapter.capture_urls()
+
+for url in urls:
     print(url)
 
+print(f"\nTotal: {len(urls)}")
