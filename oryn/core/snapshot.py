@@ -7,14 +7,14 @@ class Snapshot:
         files,
         layout,
         active_file,
-        editor_state=None,          # CHANGED
-        text_editor_state=None,     # CHANGED
-        project=None,               # CHANGED
+        editor_state=None,
+        text_editor_state=None,
+        project=None,
+        browser_urls=None,          # CHANGED
     ):
         # CHANGED:
-        # Snapshot version increased because we now preserve
-        # the VS Code raw state and portable project data.
-        self.version = 4
+        # Version 5 adds browser URL capture.
+        self.version = 5
 
         self.application = application
 
@@ -26,19 +26,16 @@ class Snapshot:
 
         self.active_file = active_file
 
-        # CHANGED:
-        # Preserve VS Code's original editor layout state.
         self.editor_state = editor_state
 
-        # CHANGED:
-        # Preserve VS Code's original text editor state,
-        # including cursor, selection and scroll information.
         self.text_editor_state = text_editor_state
 
-        # CHANGED:
-        # Preserve the portable project tree so a missing
-        # destination project can be recreated from the snapshot.
         self.project = project
+
+        # CHANGED:
+        # URLs of browser tabs that were open when
+        # this snapshot was captured.
+        self.browser_urls = browser_urls or []
 
     def to_dict(self):
         return {
@@ -54,15 +51,13 @@ class Snapshot:
 
             "active_file": self.active_file,
 
-            # CHANGED:
-            # Store raw VS Code editor layout state.
             "editor_state": self.editor_state,
 
-            # CHANGED:
-            # Store raw VS Code text editor state.
             "text_editor_state": self.text_editor_state,
 
-            # CHANGED:
-            # Store the portable project tree.
             "project": self.project,
+
+            # CHANGED:
+            # Store browser URLs as part of the snapshot.
+            "browser_urls": self.browser_urls,
         }
