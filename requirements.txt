@@ -6,3 +6,5 @@ PyJWT
 pwdlib[argon2]
 python-dotenv
 chromium-session
+pyautogui
+pyperclip
