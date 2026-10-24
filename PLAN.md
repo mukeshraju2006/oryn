@@ -106,7 +106,7 @@ Object storage may be introduced later for large snapshot payloads.
 ## Snapshot
 
 - JSON-based snapshot representation
-- Current snapshot version: 4
+- Current snapshot version: 5
 
 ---
 
@@ -187,7 +187,7 @@ Never commit secrets.
 
 VS Code is currently the primary application supported by Oryn.
 
-The snapshot system currently uses snapshot version 4.
+The snapshot system currently uses snapshot version 5.
 
 The snapshot contains information including:
 
