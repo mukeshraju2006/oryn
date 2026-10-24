@@ -85,7 +85,10 @@ def create_snapshot(
     snapshot_number = db.scalar(
         select(func.count(Snapshot.id))
         .join(Workspace, Snapshot.workspace_id == Workspace.id)
-        .where(Workspace.user_id == current_user.id)
+        .where(
+            Workspace.user_id == current_user.id,
+            Snapshot.id <= snapshot.id,
+        )
     ) or 1
 
     return {
@@ -116,33 +119,29 @@ def list_snapshots(
         db,
     )
 
-    # Build the user's sequence across all their workspaces, then return the
-    # selected workspace's snapshots with their stable user-scoped numbers.
-    user_snapshots = db.scalars(
-        select(Snapshot)
+    # Number snapshots across all workspaces owned by this user. The
+    # window function avoids loading every snapshot into application memory.
+    numbered_snapshots = db.execute(
+        select(
+            Snapshot,
+            func.row_number().over(order_by=Snapshot.id).label("snapshot_number"),
+        )
         .join(Workspace, Snapshot.workspace_id == Workspace.id)
-        .where(Workspace.user_id == current_user.id)
-        .order_by(Snapshot.id.asc())
-    ).all()
-    numbers_by_id = {
-        snapshot.id: index
-        for index, snapshot in enumerate(user_snapshots, start=1)
-    }
-
-    snapshots = db.scalars(
-        select(Snapshot)
-        .where(Snapshot.workspace_id == workspace_id)
+        .where(
+            Workspace.user_id == current_user.id,
+            Snapshot.workspace_id == workspace_id,
+        )
         .order_by(Snapshot.id.desc())
     ).all()
 
     return [
         {
             "id": snapshot.id,
-            "snapshot_number": numbers_by_id[snapshot.id],
+            "snapshot_number": snapshot_number,
             "version": snapshot.version,
             "created_at": snapshot.created_at,
         }
-        for snapshot in snapshots
+        for snapshot, snapshot_number in numbered_snapshots
     ]
 
 
