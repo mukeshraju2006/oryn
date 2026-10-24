@@ -10,7 +10,17 @@ on:
 
 jobs:
   python-checks:
-    runs-on: ubuntu-latest
+    name: Python checks (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - windows-latest
+        python-version:
+          - "3.12"
+
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -18,7 +28,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: ${{ matrix.python-version }}
           cache: pip
 
       - name: Install dependencies
