@@ -392,12 +392,12 @@ class DashboardScreen(tk.Frame):
         snapshot_number = snap.get("snapshot_number", snapshot_id)
         created = snap.get("created_at")
 
-        display_name = f"Snapshot {snapshot_number} (v{version})"
+        display_name = f"Snapshot {snapshot_number}"
         self.snapshot_summary.config(text=display_name)
 
         meta_bits = []
         if version is not None:
-            meta_bits.append(f"Version {version}")
+            meta_bits.append(f"Format v{version}")
         if created:
             meta_bits.append(f"Captured {self._format_timestamp(created)}")
         self.snapshot_meta.config(text="  \u00b7  ".join(meta_bits))
@@ -544,7 +544,7 @@ class DashboardScreen(tk.Frame):
             snapshot_number = snap.get("snapshot_number", snapshot_id)
             if snapshot_id is None:
                 continue
-            display_name = f"Snapshot {snapshot_number} (v{version})"
+            display_name = f"Snapshot {snapshot_number}"
             snapshot_names.append(display_name)
             self.snapshot_display_to_id[display_name] = snapshot_id
 
@@ -616,7 +616,7 @@ class DashboardScreen(tk.Frame):
             self.root.after(0, self.log_status, "Uploading snapshot...")
             result = self.client.create_snapshot(workspace_id=workspace_id, snapshot=snapshot)
             snapshot_number = result.get("snapshot_number", result["id"])
-            self.root.after(0, self.log_status, f"Capture successful! Snapshot {snapshot_number} created (v{result['version']})")
+            self.root.after(0, self.log_status, f"Capture successful! Snapshot {snapshot_number} created (format v{result['version']})")
             self.root.after(0, self._reload_current_workspace_snapshots)
         except Exception as exc:
             self.root.after(0, self.log_status, f"Capture failed: {exc}")
