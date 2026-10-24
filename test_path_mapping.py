@@ -390,7 +390,9 @@ class RestoreSafetyTests(unittest.TestCase):
 
         self.assertTrue(self.adapter.restore_project(project, self.root))
         self.assertEqual((self.root / "src" / "main.py").read_bytes(), b"portable")
-        self.assertFalse((self.root / "src\\main.py").exists())
+        # On POSIX, a backslash is a literal filename character; on Windows, it is a path separator.
+        if os.name != "nt":
+            self.assertFalse((self.root / "src\\main.py").exists())
 
     def test_restore_project_rejects_traversal_and_absolute_paths(self):
         unsafe_paths = [
