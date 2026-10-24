@@ -22,17 +22,17 @@ class OrynApp:
         self.root = root
         self.root.title("Oryn")
         # CHANGED: larger default window for the sidebar + content layout.
-        self.root.geometry("980x640")
-        self.root.minsize(820, 560)
+        self.root.geometry("1180x760")
+        self.root.minsize(960, 620)
         # CHANGED: warm light window chrome.
-        self.root.configure(bg="#F5F3EE")
+        self.root.configure(bg="#0B0D12")
         apply_theme(self.root)
 
         self.client = None
         self.token = None
 
         # CHANGED: warm light container.
-        self.container = tk.Frame(self.root, bg="#F5F3EE")
+        self.container = tk.Frame(self.root, bg="#0B0D12")
         self.container.pack(fill=tk.BOTH, expand=True)
 
         self.auth_screen = AuthScreen(self.container, self)
