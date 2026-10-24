@@ -1582,8 +1582,25 @@ class VSCodeAdapter:
                     continue
 
                 raw_data = base64.b64decode(
-                    encoded_data
+                    encoded_data,
+                    validate=True,
                 )
+
+                # Do not silently overwrite files if a partial restore or
+                # concurrent local change has created a conflicting target.
+                if target.exists():
+                    if not target.is_file():
+                        print(
+                            f"Refusing to overwrite non-file target: {target}"
+                        )
+                        return False
+                    if target.read_bytes() != raw_data:
+                        print(
+                            f"Refusing to overwrite existing file with different "
+                            f"content: {target}"
+                        )
+                        return False
+                    continue
 
                 target.write_bytes(
                     raw_data
