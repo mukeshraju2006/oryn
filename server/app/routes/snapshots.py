@@ -121,16 +121,20 @@ def list_snapshots(
 
     # Number snapshots across all workspaces owned by this user. The
     # window function avoids loading every snapshot into application memory.
-    numbered_snapshots = db.execute(
+    numbered_ids = (
         select(
-            Snapshot,
+            Snapshot.id.label("snapshot_id"),
             func.row_number().over(order_by=Snapshot.id).label("snapshot_number"),
         )
         .join(Workspace, Snapshot.workspace_id == Workspace.id)
-        .where(
-            Workspace.user_id == current_user.id,
-            Snapshot.workspace_id == workspace_id,
-        )
+        .where(Workspace.user_id == current_user.id)
+        .subquery()
+    )
+
+    numbered_snapshots = db.execute(
+        select(Snapshot, numbered_ids.c.snapshot_number)
+        .join(numbered_ids, Snapshot.id == numbered_ids.c.snapshot_id)
+        .where(Snapshot.workspace_id == workspace_id)
         .order_by(Snapshot.id.desc())
     ).all()
 
