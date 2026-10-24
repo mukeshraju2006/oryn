@@ -215,7 +215,7 @@ Do not trust snapshot paths simply because they came from Oryn Cloud.
 
 Current snapshot version:
 
-    4
+    5
 
 Do not increment the snapshot version merely because an implementation detail changed.
 
@@ -516,7 +516,7 @@ At the beginning of the current development phase:
     - Authentication
     - Workspace API
     - Snapshot API
-    - Snapshot v4
+    - Snapshot v5
     - VS Code capture
     - VS Code restore
     - Existing project restore
