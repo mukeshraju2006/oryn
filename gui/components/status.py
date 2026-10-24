@@ -13,7 +13,7 @@ class ActivityLog(tk.Text):
         super().__init__(
             master,
             wrap=tk.WORD,
-            Use the shared theme palette so the log matches the rest of the app.
+            # Use the shared theme palette so the log matches the rest of the app.
             bg=OrynTheme.color("surface_alt"),
             fg=OrynTheme.color("text"),
             insertbackground=OrynTheme.color("text"),
