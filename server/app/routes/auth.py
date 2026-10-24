@@ -15,6 +15,7 @@ INSECURE_SECRET_VALUES = {
     "",
     "change-this-to-a-secure-random-secret",
     "oryn-development-secret-change-this",
+    "replace-with-a-random-secret-at-least-32-characters",
 }
 
 
