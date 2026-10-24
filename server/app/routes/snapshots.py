@@ -4,7 +4,7 @@ from fastapi import (
     HTTPException,
 )
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from server.app.database import get_db
@@ -73,10 +73,7 @@ def create_snapshot(
 
     snapshot = Snapshot(
         workspace_id=workspace_id,
-        version=data.get(
-            "version",
-            1,
-        ),
+        version=data.get("version", 1),
         data=data,
     )
 
@@ -84,9 +81,17 @@ def create_snapshot(
     db.commit()
     db.refresh(snapshot)
 
+    # IDs are global database identifiers; display numbers belong to users.
+    snapshot_number = db.scalar(
+        select(func.count(Snapshot.id))
+        .join(Workspace, Snapshot.workspace_id == Workspace.id)
+        .where(Workspace.user_id == current_user.id)
+    ) or 1
+
     return {
         "id": snapshot.id,
         "workspace_id": snapshot.workspace_id,
+        "snapshot_number": snapshot_number,
         "version": snapshot.version,
         "created_at": snapshot.created_at,
     }
@@ -111,20 +116,29 @@ def list_snapshots(
         db,
     )
 
+    # Build the user's sequence across all their workspaces, then return the
+    # selected workspace's snapshots with their stable user-scoped numbers.
+    user_snapshots = db.scalars(
+        select(Snapshot)
+        .join(Workspace, Snapshot.workspace_id == Workspace.id)
+        .where(Workspace.user_id == current_user.id)
+        .order_by(Snapshot.id.asc())
+    ).all()
+    numbers_by_id = {
+        snapshot.id: index
+        for index, snapshot in enumerate(user_snapshots, start=1)
+    }
+
     snapshots = db.scalars(
         select(Snapshot)
-        .where(
-            Snapshot.workspace_id
-            == workspace_id
-        )
-        .order_by(
-            Snapshot.created_at.desc()
-        )
+        .where(Snapshot.workspace_id == workspace_id)
+        .order_by(Snapshot.id.desc())
     ).all()
 
     return [
         {
             "id": snapshot.id,
+            "snapshot_number": numbers_by_id[snapshot.id],
             "version": snapshot.version,
             "created_at": snapshot.created_at,
         }
