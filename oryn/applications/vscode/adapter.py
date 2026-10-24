@@ -1,5 +1,6 @@
 import base64
 import csv
+import fnmatch
 import json
 import os
 import re
@@ -904,8 +905,58 @@ class VSCodeAdapter:
             "build",
             ".next",
             ".cache",
-            ".angular"
+            ".angular",
+            ".ssh",
+            ".aws",
+            ".azure",
+            ".gnupg",
+            ".kube",
+            ".terraform",
         }
+
+        # Never synchronize credentials or private key material as part
+        # of a project snapshot. Example/template environment files are
+        # safe to retain because they should contain placeholders only.
+        excluded_files = {
+            ".netrc",
+            ".npmrc",
+            ".pypirc",
+            "credentials",
+            "credentials.json",
+            "secrets.json",
+            "service-account.json",
+            "id_rsa",
+            "id_dsa",
+            "id_ecdsa",
+            "id_ed25519",
+        }
+        excluded_file_patterns = (
+            "*.pem",
+            "*.key",
+            "*.p12",
+            "*.pfx",
+            "*.p7b",
+            "*.p7c",
+            "*.jks",
+            "*.keystore",
+            "*service-account*.json",
+            "*credentials*.json",
+        )
+
+        def is_sensitive_file(name):
+            lowered = name.lower()
+            if lowered in excluded_files:
+                return True
+            if lowered.startswith(".env"):
+                return lowered not in {
+                    ".env.example",
+                    ".env.sample",
+                    ".env.template",
+                }
+            return any(
+                fnmatch.fnmatch(lowered, pattern)
+                for pattern in excluded_file_patterns
+            )
 
         # CHANGED:
         # Use unsaved editor contents instead of the on-disk version.
@@ -1007,6 +1058,11 @@ class VSCodeAdapter:
             for file_name in sorted(
                 file_names
             ):
+                # Exclude secrets even if they are inside the project tree;
+                # .gitignore is not consulted by this filesystem walk.
+                if is_sensitive_file(file_name):
+                    continue
+
                 file_path = (
                     current_path / file_name
                 )
