@@ -23,6 +23,9 @@ def _get_secret_key():
     if (
         len(secret) < 32
         or secret in INSECURE_SECRET_VALUES
+        or secret.lower().startswith(
+            ("change-this", "replace-with", "oryn-development")
+        )
     ):
         raise HTTPException(
             status_code=503,
