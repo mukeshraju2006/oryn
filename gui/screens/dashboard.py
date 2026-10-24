@@ -106,7 +106,7 @@ class DashboardScreen(tk.Frame):
         body.grid(row=2, column=0, sticky=tk.NSEW)
         # CHANGED: minsize keeps the sidebar column wide; weights let the
         # content column absorb extra width.
-        body.columnconfigure(0, weight=0, minsize=240)
+        body.columnconfigure(0, weight=0, minsize=220)
         body.columnconfigure(1, weight=0)
         body.columnconfigure(2, weight=1)
         body.rowconfigure(0, weight=1)
@@ -244,7 +244,7 @@ class DashboardScreen(tk.Frame):
 
         # Workspace title block.
         title_row = ttk.Frame(content, style="Oryn.TFrame")
-        title_row.grid(row=0, column=0, sticky=tk.EW, padx=(32, 32), pady=(28, 2))
+        title_row.grid(row=0, column=0, sticky=tk.EW, padx=(24, 24), pady=(28, 2))
         title_row.columnconfigure(0, weight=1)
 
         self.workspace_title = ttk.Label(
@@ -262,11 +262,11 @@ class DashboardScreen(tk.Frame):
         self.workspace_meta.grid(row=1, column=0, sticky=tk.EW, pady=(3, 0))
 
         # CHANGED: divider gridded in its own row (content is grid-managed).
-        divider(content).grid(row=1, column=0, sticky=tk.EW, padx=32, pady=(16, 0))
+        divider(content).grid(row=1, column=0, sticky=tk.EW, padx=24, pady=(16, 0))
 
         # Snapshot summary block.
         summary = ttk.Frame(content, style="Oryn.Card.TFrame", padding=18)
-        summary.grid(row=2, column=0, sticky=tk.EW, padx=32, pady=(20, 0))
+        summary.grid(row=2, column=0, sticky=tk.EW, padx=24, pady=(20, 0))
         summary.columnconfigure(0, weight=1)
 
         ttk.Label(summary, text="LATEST SNAPSHOT", style="Oryn.Card.Section.TLabel").pack(anchor=tk.W)
@@ -291,7 +291,7 @@ class DashboardScreen(tk.Frame):
 
         # Application and state information.
         info = ttk.Frame(content, style="Oryn.Card.TFrame", padding=18)
-        info.grid(row=3, column=0, sticky=tk.EW, padx=32, pady=(14, 0))
+        info.grid(row=3, column=0, sticky=tk.EW, padx=24, pady=(14, 0))
         info.columnconfigure(1, weight=1)
 
         ttk.Label(info, text="APPLICATION", style="Oryn.Card.Section.TLabel").grid(row=0, column=0, sticky=tk.W, padx=(0, 16))
@@ -304,7 +304,7 @@ class DashboardScreen(tk.Frame):
 
         # Actions row: Capture is the strongest action, Restore quieter.
         actions = ttk.Frame(content, style="Oryn.TFrame")
-        actions.grid(row=4, column=0, sticky=tk.EW, padx=32, pady=(26, 0))
+        actions.grid(row=4, column=0, sticky=tk.EW, padx=24, pady=(26, 0))
 
         self.capture_button = primary_button(
             actions, text="Capture Workspace", command=self.capture_workspace
@@ -318,11 +318,11 @@ class DashboardScreen(tk.Frame):
 
         # Activity history.
         ttk.Label(content, text="ACTIVITY", style="Oryn.Section.TLabel").grid(
-            row=5, column=0, sticky=tk.EW, padx=32, pady=(30, 7)
+            row=5, column=0, sticky=tk.EW, padx=24, pady=(30, 7)
         )
 
         self.status_text = ActivityLog(content, height=7)
-        self.status_text.grid(row=6, column=0, sticky=tk.EW, padx=32, pady=(0, 28))
+        self.status_text.grid(row=6, column=0, sticky=tk.EW, padx=24, pady=(0, 28))
 
     # ------------------------------------------------------------------
     # Content scrolling helpers (presentation only)
