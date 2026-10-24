@@ -87,6 +87,9 @@ def register(
             detail="email and password are required",
         )
 
+    # Validate auth configuration before creating a database row.
+    _get_secret_key()
+
     existing_user = db.scalar(
         select(User).where(
             User.email == email
