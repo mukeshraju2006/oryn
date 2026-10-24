@@ -1,4 +1,5 @@
 import json
+import os
 import urllib.request
 
 
@@ -6,10 +7,16 @@ class CloudClient:
 
     def __init__(
         self,
-        base_url="https://oryn-navy.vercel.app",
+        base_url=None,
         token=None,
     ):
-        self.base_url = base_url.rstrip("/")
+        # Allow deployments to override the API URL without changing the
+        # desktop code. The default remains the existing configured host.
+        self.base_url = (
+            base_url
+            or os.getenv("ORYN_API_URL")
+            or "https://oryn-navy.vercel.app"
+        ).rstrip("/")
 
         # CHANGED:
         # Store authentication token.
