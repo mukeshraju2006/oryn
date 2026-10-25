@@ -85,3 +85,55 @@ def test_snapshot_upload_adds_a_valid_integrity_checksum(monkeypatch):
     assert captured["method"] == "POST"
     assert captured["payload"]["_integrity"]["algorithm"] == "sha256"
     assert migrate_snapshot_data(captured["payload"])["application"] == "vscode"
+
+
+
+def test_snapshot_upload_prunes_largest_project_file_to_fit_gateway_limit(monkeypatch):
+    import base64
+    import gzip
+    import random
+
+    client = CloudClient(base_url="https://example.invalid")
+    captured = {}
+
+    # Deterministic incompressible content simulates binary assets that gzip
+    # cannot shrink enough to pass the hosting request-body limit.
+    random_bytes = random.Random(42).randbytes(3_000_000)
+    encoded = base64.b64encode(random_bytes).decode("ascii")
+
+    def fake_request(url, data=None, method="GET", content_encoding=None):
+        captured["compressed_bytes"] = len(data)
+        captured["payload"] = json.loads(
+            gzip.decompress(data).decode("utf-8")
+            if content_encoding == "gzip" else data.decode("utf-8")
+        )
+        captured["method"] = method
+        return {"id": 9, "snapshot_number": 1}
+
+    monkeypatch.setattr(client, "_request", fake_request)
+
+    class SnapshotStub:
+        def to_dict(self):
+            return {
+                "version": 5,
+                "application": "vscode",
+                "workspace": {"path": "/tmp/project"},
+                "files": [],
+                "browser_urls": [],
+                "project": {
+                    "root": ".",
+                    "directories": [],
+                    "files": [{"path": "assets/large.bin", "data": encoded,
+                               "size": len(random_bytes), "encoding": "base64"}],
+                },
+            }
+
+    result = client.create_snapshot(3, SnapshotStub())
+    assert result["id"] == 9
+    assert captured["method"] == "POST"
+    from oryn.cloud.client import MAX_COMPRESSED_SNAPSHOT_BYTES
+    assert captured["compressed_bytes"] <= MAX_COMPRESSED_SNAPSHOT_BYTES
+    assert captured["payload"]["project"]["files"] == []
+    assert captured["payload"]["project"]["omitted_files"] == ["assets/large.bin"]
+    assert result["_client_capture"]["omitted_project_files"] == ["assets/large.bin"]
+    assert migrate_snapshot_data(captured["payload"])["application"] == "vscode"

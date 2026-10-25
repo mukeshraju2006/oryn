@@ -1,3 +1,4 @@
+import copy
 import gzip
 import hashlib
 import json
@@ -6,6 +7,10 @@ import time
 import urllib.request
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
+
+
+MAX_COMPRESSED_SNAPSHOT_BYTES = int(3.5 * 1024 * 1024)
+MAX_UNCOMPRESSED_SNAPSHOT_BYTES = int(7.5 * 1024 * 1024)
 
 
 class CloudClient:
@@ -197,40 +202,122 @@ class CloudClient:
         workspace_id,
         snapshot,
     ):
+        # Vercel rejects request bodies well below the API's 8 MiB decoded
+        # limit. Keep a conservative compressed-body budget and leave enough
+        # headroom for gateway/protocol differences.
+        original_payload = copy.deepcopy(snapshot.to_dict())
+        project = original_payload.get("project")
+        project_files = (
+            list(project.get("files") or [])
+            if isinstance(project, dict) else []
+        )
+        existing_omitted = (
+            list(project.get("omitted_files") or [])
+            if isinstance(project, dict) else []
+        )
+        largest_first = sorted(
+            project_files,
+            key=lambda item: len(str(item.get("data") or "")),
+            reverse=True,
+        )
 
-        # Compact JSON avoids whitespace overhead. Gzip level 1 is fast and
-        # substantially reduces text-heavy project snapshots over slow links.
-        payload = snapshot.to_dict()
-        canonical = json.dumps(
-            payload, separators=(",", ":"), ensure_ascii=False, sort_keys=True
-        ).encode("utf-8")
-        payload["_integrity"] = {
-            "algorithm": "sha256",
-            "digest": hashlib.sha256(canonical).hexdigest(),
-        }
-        raw_data = json.dumps(
-            payload,
-            separators=(",", ":"),
-            ensure_ascii=False,
-        ).encode("utf-8")
-        content_encoding = None
-        data = raw_data
-        if len(raw_data) >= 1024:
-            data = gzip.compress(raw_data, compresslevel=1, mtime=0)
-            content_encoding = "gzip"
+        def encode_payload(omitted_count):
+            payload = copy.deepcopy(original_payload)
+            current_project = payload.get("project")
+            removed = largest_first[:omitted_count]
+            if removed and isinstance(current_project, dict):
+                removed_paths = {
+                    str(item.get("path", "unknown")) for item in removed
+                }
+                current_project["files"] = [
+                    item for item in project_files
+                    if str(item.get("path", "unknown")) not in removed_paths
+                ]
+                current_project["omitted_files"] = sorted(
+                    set(existing_omitted) | removed_paths
+                )
+            canonical = json.dumps(
+                payload, separators=(",", ":"), ensure_ascii=False,
+                sort_keys=True,
+            ).encode("utf-8")
+            payload["_integrity"] = {
+                "algorithm": "sha256",
+                "digest": hashlib.sha256(canonical).hexdigest(),
+            }
+            raw_data = json.dumps(
+                payload, separators=(",", ":"), ensure_ascii=False,
+            ).encode("utf-8")
+            compressed = gzip.compress(raw_data, compresslevel=6, mtime=0)
+            return payload, raw_data, compressed, removed
+
+        payload, raw_data, data, removed = encode_payload(0)
+        if (
+            len(raw_data) > MAX_UNCOMPRESSED_SNAPSHOT_BYTES
+            or len(data) > MAX_COMPRESSED_SNAPSHOT_BYTES
+        ):
+            if not project_files or not isinstance(project, dict):
+                raise ValueError(
+                    "This snapshot is too large to upload safely. Oryn could not "
+                    "reduce the editor/browser state enough to fit the cloud upload "
+                    "limit. Close very large editor buffers or reduce the captured "
+                    "workspace state, then try again."
+                )
+
+            # Find the smallest number of project files to omit while retaining
+            # all editor/session metadata. Largest files are removed first so the
+            # fewest files possible are omitted to fit the hosting gateway limit.
+            low, high = 1, len(largest_first)
+            best = None
+            while low <= high:
+                middle = (low + high) // 2
+                candidate = encode_payload(middle)
+                _, candidate_raw, candidate_compressed, _ = candidate
+                fits = (
+                    len(candidate_raw) <= MAX_UNCOMPRESSED_SNAPSHOT_BYTES
+                    and len(candidate_compressed) <= MAX_COMPRESSED_SNAPSHOT_BYTES
+                )
+                if fits:
+                    best = candidate
+                    high = middle - 1
+                else:
+                    low = middle + 1
+
+            if best is None:
+                raise ValueError(
+                    "This snapshot is still too large even after excluding all "
+                    "project files. Oryn kept your local workspace untouched and "
+                    "did not upload a partial snapshot. Close very large editor "
+                    "buffers or reduce the captured editor state, then try again."
+                )
+            payload, raw_data, data, removed = best
+
+        content_encoding = "gzip" if len(raw_data) >= 1024 else None
+        if content_encoding is None:
+            data = raw_data
 
         url = (
             f"{self.base_url}"
             f"/workspaces/{workspace_id}"
             f"/snapshots"
         )
-
-        return self._request(
+        result = self._request(
             url,
             data=data,
             method="POST",
             content_encoding=content_encoding,
         )
+        if isinstance(result, dict):
+            result["_client_capture"] = {
+                "omitted_project_files": [
+                    str(item.get("path", "unknown")) for item in removed
+                ],
+                "compressed_bytes": len(data),
+                "uncompressed_bytes": len(raw_data),
+                "project_files_included": len(
+                    (payload.get("project") or {}).get("files") or []
+                ) if isinstance(payload.get("project"), dict) else 0,
+            }
+        return result
 
     # CHANGED:
     # Retrieve authenticated snapshot.

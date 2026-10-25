@@ -1297,15 +1297,29 @@ class DashboardView(QWidget):
         snap = result["result"]
         self.workspace_id = result["workspace_id"]
         metrics = result.get("metrics", {})
+        capture_info = snap.get("_client_capture") or {}
+        omitted = capture_info.get("omitted_project_files") or []
         self._log(
             f"Snapshot {snap.get('snapshot_number', snap.get('id', '?'))} saved · "
-            f"{metrics.get('file_count', 0)} files · "
+            f"{metrics.get('file_count', 0)} open editor files · "
+            f"{capture_info.get('project_files_included', metrics.get('project_file_count', 0))} project files · "
             f"{metrics.get('browser_url_count', 0)} browser tabs · "
+            f"upload {capture_info.get('compressed_bytes', 0) / 1024:.0f} KiB · "
             f"total {metrics.get('total_seconds', 0):.1f}s "
             f"(editor {metrics.get('vscode_seconds', 0):.1f}s, "
             f"browser {metrics.get('browser_seconds', 0):.1f}s, "
             f"upload {metrics.get('upload_seconds', 0):.1f}s)"
         )
+        if omitted:
+            show_message_dialog(
+                self,
+                "Snapshot saved with exclusions",
+                f"Oryn saved the editor and browser state, but omitted {len(omitted)} "
+                "project file(s) to fit the cloud upload limit. The original project "
+                "files were not changed. Restoring this snapshot to a new directory "
+                "will not recreate the omitted files.",
+                details="Omitted project files:\\n" + "\\n".join(omitted),
+            )
         self.load_workspaces()
 
     def show_snapshot_details(self, snapshot_id, workspace_id, number):
@@ -1331,8 +1345,11 @@ class DashboardView(QWidget):
             f"Open editor files: {len(files)}",
             f"Browser URLs: {len(urls)}",
             f"Project payload entries: {len(project.get('files') or []) if isinstance(project, dict) else 'Not available'}",
+            f"Project files omitted for upload size: {len(project.get('omitted_files') or []) if isinstance(project, dict) else 0}",
         ]
         technical = "\n".join(details)
+        if isinstance(project, dict) and project.get("omitted_files"):
+            technical += "\n\nOmitted project files:\n" + "\n".join(project["omitted_files"])
         if urls:
             technical += "\n\nBrowser URLs:\n" + "\n".join(str(url) for url in urls)
         show_message_dialog(
@@ -1402,6 +1419,7 @@ class DashboardView(QWidget):
             f"Restore destination: {destination_text} ({destination_state})",
             f"Editor files: {len(files)}",
             f"Project files stored for recovery: {len(project_files)}",
+            f"Project files omitted due to upload limit: {len(project.get('omitted_files') or []) if isinstance(project, dict) else 0}",
             f"Browser tabs to open: {len(urls)}",
             f"Active file: {snapshot.get('active_file') or 'Not recorded'}",
             "",
