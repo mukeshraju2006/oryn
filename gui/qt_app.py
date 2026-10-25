@@ -579,21 +579,100 @@ class DashboardView(QWidget):
         self.snapshot_table.setMinimumHeight(190)
         self.snapshot_table.itemSelectionChanged.connect(self._selection_changed)
         table_col.addWidget(self.snapshot_table)
-        page.addWidget(table_card)
+        scroll.setWidget(content)
+
+        # Real navigation pages: overview, workspace management, and snapshot history.
+        self.content_stack = QStackedWidget()
+        self.content_stack.addWidget(scroll)
+
+        workspaces_page = QWidget()
+        workspaces_layout = QVBoxLayout(workspaces_page)
+        workspaces_layout.setContentsMargins(30, 28, 30, 30)
+        workspaces_layout.setSpacing(18)
+        workspaces_layout.addWidget(make_label("Workspaces", "pageTitle"))
+        workspaces_layout.addWidget(make_label(
+            "Select a workspace to manage its name or remove it with its snapshots.",
+            muted=True,
+        ))
+        self.workspace_table = QTableWidget(0, 3)
+        self.workspace_table.setHorizontalHeaderLabels(["WORKSPACE", "CREATED", "LAST UPDATED"])
+        self.workspace_table.verticalHeader().setVisible(False)
+        self.workspace_table.setShowGrid(False)
+        self.workspace_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.workspace_table.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.workspace_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.workspace_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
+        self.workspace_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        self.workspace_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
+        self.workspace_table.itemSelectionChanged.connect(self._workspace_table_selection_changed)
+        workspaces_layout.addWidget(self.workspace_table, 1)
+        workspace_buttons = QHBoxLayout()
+        workspace_buttons.addWidget(self.new_workspace_button)
+        workspace_buttons.addWidget(self.rename_workspace_button)
+        workspace_buttons.addWidget(self.delete_workspace_button)
+        workspace_buttons.addStretch(1)
+        workspaces_layout.addLayout(workspace_buttons)
+        self.content_stack.addWidget(workspaces_page)
+
+        snapshots_page = QWidget()
+        snapshots_layout = QVBoxLayout(snapshots_page)
+        snapshots_layout.setContentsMargins(30, 28, 30, 30)
+        snapshots_layout.setSpacing(12)
+        snapshots_layout.addWidget(make_label("Snapshot history", "pageTitle"))
+        snapshots_layout.addWidget(make_label(
+            "Search, inspect, compare, restore, or delete snapshots in the selected workspace.",
+            muted=True,
+        ))
+        snapshots_layout.addWidget(table_card, 1)
+        self.content_stack.addWidget(snapshots_page)
 
         self.status_label = make_label("Ready", muted=True)
-        page.addWidget(self.status_label)
-        scroll.setWidget(content)
-        main_col.addWidget(scroll, 1)
+        self.status_label.setContentsMargins(18, 6, 18, 8)
+        main_col.addWidget(self.content_stack, 1)
+        main_col.addWidget(self.status_label)
         root.addWidget(main, 1)
 
-        # Until dedicated page views are introduced, navigation should move
-        # to the relevant real section rather than merely focus an arbitrary widget.
-        self.nav_workspaces.clicked.connect(lambda: self.workspace_combo.setFocus())
-        self.nav_snapshots.clicked.connect(
-            lambda: self.snapshot_table.scrollToTop() or self.snapshot_table.setFocus()
-        )
-        self.nav_overview.clicked.connect(lambda: self.status_label.setText("Overview"))
+        self.nav_overview.clicked.connect(lambda: self._show_page(0))
+        self.nav_workspaces.clicked.connect(lambda: self._show_page(1))
+        self.nav_snapshots.clicked.connect(lambda: self._show_page(2))
+        self._show_page(0)
+
+    def _show_page(self, index):
+        self.content_stack.setCurrentIndex(index)
+        buttons = (self.nav_overview, self.nav_workspaces, self.nav_snapshots)
+        for position, button in enumerate(buttons):
+            button.setObjectName("navActive" if position == index else "nav")
+            button.style().unpolish(button)
+            button.style().polish(button)
+        labels = ("Workspace / Overview", "Workspace / Workspaces", "Workspace / Snapshots")
+        # Update the breadcrumb label in the top bar.
+        for label in self.findChildren(QLabel):
+            if label.text().startswith("Workspace / "):
+                label.setText(labels[index])
+                break
+        if index == 1 and self.workspace_id is not None:
+            self._select_workspace_table_row(self.workspace_id)
+        if index == 2:
+            self.snapshot_table.scrollToTop()
+
+    def _workspace_table_selection_changed(self):
+        selected = self.workspace_table.selectedItems()
+        if not selected:
+            return
+        workspace_id = self.workspace_table.item(
+            self.workspace_table.currentRow(), 0
+        ).data(Qt.UserRole)
+        for index in range(self.workspace_combo.count()):
+            if self.workspace_combo.itemData(index) == workspace_id:
+                self.workspace_combo.setCurrentIndex(index)
+                return
+
+    def _select_workspace_table_row(self, workspace_id):
+        for row in range(self.workspace_table.rowCount()):
+            item = self.workspace_table.item(row, 0)
+            if item is not None and item.data(Qt.UserRole) == workspace_id:
+                self.workspace_table.selectRow(row)
+                return
 
     def _metric(self, layout, col, title, value, note, icon):
         card = QFrame()
@@ -654,6 +733,7 @@ class DashboardView(QWidget):
         self.workspace_combo.setEnabled(not busy)
         self.snapshot_search.setEnabled(not busy)
         self.snapshot_table.setEnabled(not busy)
+        self.workspace_table.setEnabled(not busy)
         self.compare_button.setEnabled(not busy)
         self.logout_button.setEnabled(not busy)
 
@@ -676,6 +756,18 @@ class DashboardView(QWidget):
         self.workspace_combo.blockSignals(False)
         self.workspace_id = self.workspace_combo.currentData()
         self.metric_workspaces[0].setText(str(len(self.workspaces)))
+        self.workspace_table.blockSignals(True)
+        self.workspace_table.setRowCount(0)
+        for workspace in self.workspaces:
+            row = self.workspace_table.rowCount()
+            self.workspace_table.insertRow(row)
+            name_item = QTableWidgetItem(str(workspace.get("name", "Untitled workspace")))
+            name_item.setData(Qt.UserRole, workspace.get("id"))
+            self.workspace_table.setItem(row, 0, name_item)
+            self.workspace_table.setItem(row, 1, QTableWidgetItem(self._format_date(workspace.get("created_at"))))
+            self.workspace_table.setItem(row, 2, QTableWidgetItem(self._format_date(workspace.get("updated_at"))))
+        self.workspace_table.blockSignals(False)
+        self._select_workspace_table_row(self.workspace_id)
         self._log(f"{len(self.workspaces)} workspace(s) loaded")
         if self.workspace_id is not None:
             self.load_snapshots()
