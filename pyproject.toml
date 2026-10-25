@@ -11,6 +11,7 @@ dependencies = [
     "PyJWT>=2.10,<3.0",
     "pwdlib[argon2]>=0.2,<1.0",
     "python-dotenv>=1.0,<2.0",
+    "python-multipart>=0.0.9,<1.0",
 ]
 
 [tool.vercel]
