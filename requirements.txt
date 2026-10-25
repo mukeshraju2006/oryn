@@ -5,7 +5,3 @@ psycopg[binary]
 PyJWT
 pwdlib[argon2]
 python-dotenv
-chromium-session
-pyautogui
-pyperclip
-PySide6-Essentials
