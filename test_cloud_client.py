@@ -1,7 +1,5 @@
 """Cloud client retry and timing regression tests."""
 
-import io
-import json
 from urllib.error import URLError
 
 import pytest
