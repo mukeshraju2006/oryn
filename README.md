@@ -141,11 +141,11 @@ The restored workspace is reconstructed on the destination device using the info
 
 ### Desktop Application
 
-The desktop application is written in Python.
+The desktop application is written in Python and uses **PySide6 / Qt** for its modern desktop interface. The previous Tkinter screens remain in the repository during migration, but `python -m oryn` launches the Qt interface.
 
 The main components include:
 
-- GUI
+- Qt desktop GUI
 - Application adapters
 - Snapshot model
 - Cloud client
@@ -228,13 +228,13 @@ Oryn-0.1.0-x86_64.AppImage
 Make it executable:
 
 ```bash
-chmod +x Oryn-0.1.0-linux-x86_64.AppImage
+chmod +x Oryn-0.1.0-x86_64.AppImage
 ```
 
 Run:
 
 ```bash
-./Oryn-0.1.0-linux-x86_64.AppImage
+./Oryn-0.1.0-x86_64.AppImage
 ```
 
 The distributed AppImage does not require Python or a Python virtual environment.
@@ -407,7 +407,7 @@ pip install -r requirements.txt
 Run Oryn:
 
 ```bash
-python -m gui.app
+python -m oryn
 ```
 
 ---
@@ -435,7 +435,7 @@ pip install -r requirements.txt
 Run Oryn:
 
 ```powershell
-python -m gui.app
+python -m oryn
 ```
 
 ---
@@ -457,7 +457,7 @@ python -m PyInstaller `
     gui\app.py
 ```
 
-The packaged application is generated under:
+Collect the Qt runtime with PyInstaller as needed for the target platform. The packaged application is generated under:
 
 ```text
 dist/Oryn/
@@ -487,7 +487,7 @@ python -m PyInstaller \
     --noconfirm \
     --windowed \
     --name Oryn \
-    gui/app.py
+    oryn/__main__.py
 ```
 
 The packaged application is generated under:
