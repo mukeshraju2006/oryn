@@ -289,8 +289,9 @@ class AuthView(QWidget):
             try:
                 save_token(authed_client.token)
             except OSError:
-                self.message.setText("Signed in, but the session could not be saved on this device.")
-                return
+                # A disk permission issue should not discard a valid live
+                # session; the user can still work until the app closes.
+                self.message.setText("Signed in. This device could not persist the session, so you may need to sign in again.")
             self.authenticated.emit(authed_client)
 
         def failure(message):
@@ -588,7 +589,9 @@ class DashboardView(QWidget):
     def _set_busy(self, busy):
         self.busy = busy
         self.capture_button.setEnabled(not busy)
-        self.restore_button.setEnabled(not busy)
+        self.restore_button.setEnabled(
+            not busy and bool(self.snapshot_table.selectedItems())
+        )
         self.refresh_button.setEnabled(not busy)
         self.new_workspace_button.setEnabled(not busy)
         self.workspace_combo.setEnabled(not busy)
