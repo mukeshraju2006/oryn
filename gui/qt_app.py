@@ -424,7 +424,7 @@ class DashboardView(QWidget):
         self.logout_button = QPushButton("↪   Sign out")
         self.logout_button.clicked.connect(self.logout)
         side.addWidget(self.logout_button)
-        root.addWidget(side)
+        root.addWidget(sidebar)
 
         main = QWidget()
         main.setObjectName("root")
