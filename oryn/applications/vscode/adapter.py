@@ -216,8 +216,6 @@ class VSCodeAdapter:
                 encoding="utf-8",
                 errors="replace",
                 timeout=3.0,
-                timeout=3.0,
-                timeout=3.0,
             )
         except (OSError, subprocess.TimeoutExpired) as error:
             print(f"Could not query VS Code status: {error}")
@@ -422,6 +420,7 @@ class VSCodeAdapter:
                 text=True,
                 encoding="utf-8",
                 errors="replace",
+                timeout=3.0,
             )
         except (OSError, subprocess.TimeoutExpired):
             status = None
@@ -457,6 +456,7 @@ class VSCodeAdapter:
                 text=True,
                 encoding="utf-8",
                 errors="replace",
+                timeout=3.0,
             )
         except (OSError, subprocess.TimeoutExpired):
             return None
