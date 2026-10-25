@@ -5,6 +5,7 @@ import json
 import os
 import time
 import urllib.request
+from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
 
 
@@ -153,16 +154,28 @@ class CloudClient:
         )
 
         started = time.perf_counter()
-        with urllib.request.urlopen(
-            request, timeout=self.timeout
-        ) as response:
-            raw = response.read()
-            result = json.loads(raw.decode("utf-8"))
-            self._record_request_metrics(
-                method, url, started, response.status,
-                response.headers.get("X-Oryn-Process-Time"), len(raw),
-            )
-            return result
+        # GET requests are safe to retry once on transient network/server errors.
+        # Mutating requests are deliberately never retried to avoid duplicate writes.
+        for attempt in range(2):
+            try:
+                with urllib.request.urlopen(
+                    request, timeout=self.timeout
+                ) as response:
+                    raw = response.read()
+                    result = json.loads(raw.decode("utf-8"))
+                    self._record_request_metrics(
+                        method, url, started, response.status,
+                        response.headers.get("X-Oryn-Process-Time"), len(raw),
+                    )
+                    return result
+            except HTTPError as exc:
+                if method != "GET" or exc.code not in (429, 502, 503, 504) or attempt == 1:
+                    raise
+            except URLError:
+                if method != "GET" or attempt == 1:
+                    raise
+            time.sleep(0.35 * (attempt + 1))
+        raise RuntimeError("Cloud request failed after bounded retries.")
 
     def _record_request_metrics(self, method, url, started, status, server_seconds, response_bytes):
         try:
