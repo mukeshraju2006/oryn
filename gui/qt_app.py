@@ -1036,6 +1036,9 @@ class DashboardView(QWidget):
         self._task(lambda: self.client.create_workspace(name), self._workspace_created, "Creating workspace…")
 
     def _workspace_created(self, result):
+        # Select the workspace just created instead of leaving the user in the
+        # previously selected workspace after a successful create.
+        self.workspace_id = result.get("id", self.workspace_id)
         self._log(f"Workspace created: {result.get('name', 'New workspace')}")
         self.load_workspaces()
 

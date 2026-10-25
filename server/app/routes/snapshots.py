@@ -26,6 +26,7 @@ router = APIRouter(
 )
 
 MAX_SNAPSHOT_BYTES = 8 * 1024 * 1024
+MAX_SNAPSHOT_VERSION = 5
 
 
 # CHANGED:
@@ -78,6 +79,11 @@ def create_snapshot(
     version = data.get("version", 1)
     if isinstance(version, bool) or not isinstance(version, int) or version < 1:
         raise HTTPException(status_code=422, detail="Snapshot version must be a positive integer.")
+    if version > MAX_SNAPSHOT_VERSION:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Snapshot version {version} is not supported by this API (maximum {MAX_SNAPSHOT_VERSION}).",
+        )
 
     # Limit persisted snapshot size to protect the database from accidental
     # huge payloads and unbounded client uploads.
