@@ -1,9 +1,8 @@
 """Oryn visual system.
 
-A warm, light, understated interface: warm ivory surfaces, stone borders,
-charcoal typography, muted sage as the working accent and restrained
-terracotta for secondary emphasis. Presentation only - no behaviour lives
-here.
+A compact dark developer workspace: deep graphite surfaces, crisp typography,
+subtle borders and restrained violet accents. Presentation only; behaviour
+lives in the screens.
 """
 
 import tkinter as tk
@@ -13,37 +12,37 @@ from tkinter import ttk
 class OrynTheme:
     # CHANGED: warm light palette replacing the dark developer theme.
     COLORS = {
-        "bg": "#F5F3EE",            # warm ivory, app background
-        "bg_alt": "#EFECE5",        # slightly deeper ivory (sidebar, wells)
-        "surface": "#FBFAF7",       # card / panel surface
-        "surface_alt": "#F3F1EB",   # recessed surface (log, selected rows)
-        "border": "#DEDCD5",        # stone hairline
-        "border_strong": "#CDCAC1", # slightly firmer hairline
-        "text": "#252522",          # charcoal, primary typography
-        "text_secondary": "#6E6C64",# muted stone, secondary text
-        "text_faint": "#98958B",    # metadata
-        "text_on_accent": "#FCFBF8",
-        "accent": "#5B6B4F",        # muted sage / olive
-        "accent_hover": "#66775A",
-        "accent_pressed": "#4F5E45",
-        "accent_soft": "#E7E9DF",   # very pale sage wash
-        "accent_soft_hover": "#DEE1D4",
-        "secondary": "#9C5B40",     # muted terracotta
-        "secondary_soft": "#F2E4DC",# pale terracotta wash
-        "danger": "#8F3E32",        # terracotta-leaning danger text
-        "selection": "#DCE2D2",     # pale sage selection
-        "selected_text": "#252522",
+        "bg": "#0B0D12",
+        "bg_alt": "#11151D",
+        "surface": "#151A24",
+        "surface_alt": "#1C2230",
+        "border": "#282F3D",
+        "border_strong": "#394356",
+        "text": "#EDF0F7",
+        "text_secondary": "#A4ADBF",
+        "text_faint": "#737E93",
+        "text_on_accent": "#FFFFFF",
+        "accent": "#8B7CFF",
+        "accent_hover": "#9B8FFF",
+        "accent_pressed": "#7162E8",
+        "accent_soft": "#28243F",
+        "accent_soft_hover": "#353052",
+        "secondary": "#F0A77A",
+        "secondary_soft": "#38271F",
+        "danger": "#FF8B86",
+        "selection": "#383253",
+        "selected_text": "#FFFFFF",
     }
 
     FONTS = {
-        "display": ("Segoe UI Semibold", 19),
-        "heading": ("Segoe UI Semibold", 12),
-        "subheading": ("Segoe UI", 10),
-        "body": ("Segoe UI", 9),
-        "small": ("Segoe UI", 8),
-        "label": ("Segoe UI Semibold", 8),
-        "button": ("Segoe UI Semibold", 9),
-        "mono": ("Consolas", 9),
+        "display": ("Inter", 21),
+        "heading": ("Inter", 12),
+        "subheading": ("Inter", 10),
+        "body": ("Inter", 9),
+        "small": ("Inter", 8),
+        "label": ("Inter", 8),
+        "button": ("Inter", 9),
+        "mono": ("JetBrains Mono", 9),
     }
 
     PADDING = {

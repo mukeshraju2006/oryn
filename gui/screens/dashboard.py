@@ -106,7 +106,7 @@ class DashboardScreen(tk.Frame):
         body.grid(row=2, column=0, sticky=tk.NSEW)
         # CHANGED: minsize keeps the sidebar column wide; weights let the
         # content column absorb extra width.
-        body.columnconfigure(0, weight=0, minsize=240)
+        body.columnconfigure(0, weight=0, minsize=220)
         body.columnconfigure(1, weight=0)
         body.columnconfigure(2, weight=1)
         body.rowconfigure(0, weight=1)
@@ -244,7 +244,7 @@ class DashboardScreen(tk.Frame):
 
         # Workspace title block.
         title_row = ttk.Frame(content, style="Oryn.TFrame")
-        title_row.grid(row=0, column=0, sticky=tk.EW, padx=(32, 32), pady=(28, 2))
+        title_row.grid(row=0, column=0, sticky=tk.EW, padx=(24, 24), pady=(28, 2))
         title_row.columnconfigure(0, weight=1)
 
         self.workspace_title = ttk.Label(
@@ -262,19 +262,19 @@ class DashboardScreen(tk.Frame):
         self.workspace_meta.grid(row=1, column=0, sticky=tk.EW, pady=(3, 0))
 
         # CHANGED: divider gridded in its own row (content is grid-managed).
-        divider(content).grid(row=1, column=0, sticky=tk.EW, padx=32, pady=(16, 0))
+        divider(content).grid(row=1, column=0, sticky=tk.EW, padx=24, pady=(16, 0))
 
         # Snapshot summary block.
-        summary = ttk.Frame(content, style="Oryn.TFrame")
-        summary.grid(row=2, column=0, sticky=tk.EW, padx=32, pady=(20, 0))
+        summary = ttk.Frame(content, style="Oryn.Card.TFrame", padding=18)
+        summary.grid(row=2, column=0, sticky=tk.EW, padx=24, pady=(20, 0))
         summary.columnconfigure(0, weight=1)
 
-        ttk.Label(summary, text="CURRENT SNAPSHOT", style="Oryn.Section.TLabel").pack(anchor=tk.W)
+        ttk.Label(summary, text="LATEST SNAPSHOT", style="Oryn.Card.Section.TLabel").pack(anchor=tk.W)
 
         self.snapshot_summary = ttk.Label(
             summary,
             text="\u2014",
-            style="Oryn.Heading.TLabel",
+            style="Oryn.Card.Heading.TLabel",
             wraplength=520,
             justify=tk.LEFT,
         )
@@ -283,28 +283,28 @@ class DashboardScreen(tk.Frame):
         self.snapshot_meta = ttk.Label(
             summary,
             text="",
-            style="Oryn.Metadata.TLabel",
+            style="Oryn.Card.Metadata.TLabel",
             wraplength=520,
             justify=tk.LEFT,
         )
         self.snapshot_meta.pack(anchor=tk.W, pady=(3, 0))
 
         # Application and state information.
-        info = ttk.Frame(content, style="Oryn.TFrame")
-        info.grid(row=3, column=0, sticky=tk.EW, padx=32, pady=(22, 0))
+        info = ttk.Frame(content, style="Oryn.Card.TFrame", padding=18)
+        info.grid(row=3, column=0, sticky=tk.EW, padx=24, pady=(14, 0))
         info.columnconfigure(1, weight=1)
 
-        ttk.Label(info, text="APPLICATION", style="Oryn.Section.TLabel").grid(row=0, column=0, sticky=tk.W, padx=(0, 16))
-        self.app_value = ttk.Label(info, text="\u2014", style="Oryn.Secondary.TLabel")
+        ttk.Label(info, text="APPLICATION", style="Oryn.Card.Section.TLabel").grid(row=0, column=0, sticky=tk.W, padx=(0, 16))
+        self.app_value = ttk.Label(info, text="\u2014", style="Oryn.Card.Secondary.TLabel")
         self.app_value.grid(row=0, column=1, sticky=tk.W)
 
-        ttk.Label(info, text="LAST CAPTURED", style="Oryn.Section.TLabel").grid(row=1, column=0, sticky=tk.W, padx=(0, 16), pady=(10, 0))
-        self.captured_value = ttk.Label(info, text="\u2014", style="Oryn.Secondary.TLabel")
+        ttk.Label(info, text="LAST CAPTURED", style="Oryn.Card.Section.TLabel").grid(row=1, column=0, sticky=tk.W, padx=(0, 16), pady=(10, 0))
+        self.captured_value = ttk.Label(info, text="\u2014", style="Oryn.Card.Secondary.TLabel")
         self.captured_value.grid(row=1, column=1, sticky=tk.W, pady=(10, 0))
 
         # Actions row: Capture is the strongest action, Restore quieter.
         actions = ttk.Frame(content, style="Oryn.TFrame")
-        actions.grid(row=4, column=0, sticky=tk.EW, padx=32, pady=(26, 0))
+        actions.grid(row=4, column=0, sticky=tk.EW, padx=24, pady=(26, 0))
 
         self.capture_button = primary_button(
             actions, text="Capture Workspace", command=self.capture_workspace
@@ -318,11 +318,11 @@ class DashboardScreen(tk.Frame):
 
         # Activity history.
         ttk.Label(content, text="ACTIVITY", style="Oryn.Section.TLabel").grid(
-            row=5, column=0, sticky=tk.EW, padx=32, pady=(30, 7)
+            row=5, column=0, sticky=tk.EW, padx=24, pady=(30, 7)
         )
 
         self.status_text = ActivityLog(content, height=7)
-        self.status_text.grid(row=6, column=0, sticky=tk.EW, padx=32, pady=(0, 28))
+        self.status_text.grid(row=6, column=0, sticky=tk.EW, padx=24, pady=(0, 28))
 
     # ------------------------------------------------------------------
     # Content scrolling helpers (presentation only)
@@ -389,14 +389,15 @@ class DashboardScreen(tk.Frame):
         snap = self.snapshots[index]
         snapshot_id = snap.get("id")
         version = snap.get("version")
+        snapshot_number = snap.get("snapshot_number", snapshot_id)
         created = snap.get("created_at")
 
-        display_name = f"Snapshot {snapshot_id} (v{version})"
+        display_name = f"Snapshot {snapshot_number}"
         self.snapshot_summary.config(text=display_name)
 
         meta_bits = []
         if version is not None:
-            meta_bits.append(f"Version {version}")
+            meta_bits.append(f"Format v{version}")
         if created:
             meta_bits.append(f"Captured {self._format_timestamp(created)}")
         self.snapshot_meta.config(text="  \u00b7  ".join(meta_bits))
@@ -540,9 +541,10 @@ class DashboardScreen(tk.Frame):
         for snap in self.snapshots:
             snapshot_id = snap.get("id")
             version = snap.get("version")
+            snapshot_number = snap.get("snapshot_number", snapshot_id)
             if snapshot_id is None:
                 continue
-            display_name = f"Snapshot {snapshot_id} (v{version})"
+            display_name = f"Snapshot {snapshot_number}"
             snapshot_names.append(display_name)
             self.snapshot_display_to_id[display_name] = snapshot_id
 
@@ -613,7 +615,8 @@ class DashboardScreen(tk.Frame):
 
             self.root.after(0, self.log_status, "Uploading snapshot...")
             result = self.client.create_snapshot(workspace_id=workspace_id, snapshot=snapshot)
-            self.root.after(0, self.log_status, f"Capture successful! Snapshot ID: {result['id']}, Version: {result['version']}")
+            snapshot_number = result.get("snapshot_number", result["id"])
+            self.root.after(0, self.log_status, f"Capture successful! Snapshot {snapshot_number} created (format v{result['version']})")
             self.root.after(0, self._reload_current_workspace_snapshots)
         except Exception as exc:
             self.root.after(0, self.log_status, f"Capture failed: {exc}")

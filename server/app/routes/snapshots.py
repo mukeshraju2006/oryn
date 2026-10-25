@@ -4,7 +4,7 @@ from fastapi import (
     HTTPException,
 )
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from server.app.database import get_db
@@ -73,10 +73,7 @@ def create_snapshot(
 
     snapshot = Snapshot(
         workspace_id=workspace_id,
-        version=data.get(
-            "version",
-            1,
-        ),
+        version=data.get("version", 1),
         data=data,
     )
 
@@ -84,9 +81,20 @@ def create_snapshot(
     db.commit()
     db.refresh(snapshot)
 
+    # IDs are global database identifiers; display numbers belong to users.
+    snapshot_number = db.scalar(
+        select(func.count(Snapshot.id))
+        .join(Workspace, Snapshot.workspace_id == Workspace.id)
+        .where(
+            Workspace.user_id == current_user.id,
+            Snapshot.id <= snapshot.id,
+        )
+    ) or 1
+
     return {
         "id": snapshot.id,
         "workspace_id": snapshot.workspace_id,
+        "snapshot_number": snapshot_number,
         "version": snapshot.version,
         "created_at": snapshot.created_at,
     }
@@ -111,24 +119,33 @@ def list_snapshots(
         db,
     )
 
-    snapshots = db.scalars(
-        select(Snapshot)
-        .where(
-            Snapshot.workspace_id
-            == workspace_id
+    # Number snapshots across all workspaces owned by this user. The
+    # window function avoids loading every snapshot into application memory.
+    numbered_ids = (
+        select(
+            Snapshot.id.label("snapshot_id"),
+            func.row_number().over(order_by=Snapshot.id).label("snapshot_number"),
         )
-        .order_by(
-            Snapshot.created_at.desc()
-        )
+        .join(Workspace, Snapshot.workspace_id == Workspace.id)
+        .where(Workspace.user_id == current_user.id)
+        .subquery()
+    )
+
+    numbered_snapshots = db.execute(
+        select(Snapshot, numbered_ids.c.snapshot_number)
+        .join(numbered_ids, Snapshot.id == numbered_ids.c.snapshot_id)
+        .where(Snapshot.workspace_id == workspace_id)
+        .order_by(Snapshot.id.desc())
     ).all()
 
     return [
         {
             "id": snapshot.id,
+            "snapshot_number": snapshot_number,
             "version": snapshot.version,
             "created_at": snapshot.created_at,
         }
-        for snapshot in snapshots
+        for snapshot, snapshot_number in numbered_snapshots
     ]
 
 

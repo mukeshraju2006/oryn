@@ -36,13 +36,23 @@ def save_token(token):
         exist_ok=True,
     )
 
+    # Keep saved bearer tokens private on POSIX systems. chmod is not
+    # available with the same semantics on Windows, where directory ACLs
+    # govern access.
+    if os.name == "posix":
+        SESSION_FILE.parent.chmod(0o700)
+
     SESSION_FILE.write_text(
         json.dumps(
             {
                 "access_token": token,
             }
-        )
+        ),
+        encoding="utf-8",
     )
+
+    if os.name == "posix":
+        SESSION_FILE.chmod(0o600)
 
 
 def load_token():
@@ -53,7 +63,7 @@ def load_token():
     try:
 
         data = json.loads(
-            SESSION_FILE.read_text()
+            SESSION_FILE.read_text(encoding="utf-8")
         )
 
         return data.get(

@@ -12,7 +12,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import tkinter as tk
 from gui.app import OrynGUI
 
-def test_gui_launch():
+def run_gui_smoke_test():
     root = tk.Tk()
     app = OrynGUI(root)
     # Destroy the window after 2000 milliseconds
@@ -22,7 +22,7 @@ def test_gui_launch():
 
 if __name__ == "__main__":
     try:
-        test_gui_launch()
+        run_gui_smoke_test()
         print("GUI launched and destroyed successfully after 2 seconds")
         sys.exit(0)
     except Exception as e:

@@ -1,6 +1,6 @@
 """Activity log: a read-only, append-only history of user-visible actions.
 
-Presentation restyled for the warm-light theme; append behaviour unchanged.
+Presentation uses the shared dark theme; append behaviour is unchanged.
 """
 
 import tkinter as tk
@@ -13,7 +13,7 @@ class ActivityLog(tk.Text):
         super().__init__(
             master,
             wrap=tk.WORD,
-            # CHANGED: light theme colors.
+            # Use the shared theme palette so the log matches the rest of the app.
             bg=OrynTheme.color("surface_alt"),
             fg=OrynTheme.color("text"),
             insertbackground=OrynTheme.color("text"),

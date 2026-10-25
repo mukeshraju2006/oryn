@@ -1,3 +1,6 @@
+import os
+from datetime import datetime, timedelta, timezone
+
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.security import OAuth2PasswordBearer
 from pwdlib import PasswordHash
@@ -6,9 +9,44 @@ from sqlalchemy.orm import Session
 import jwt
 
 
-# CHANGED: Authentication configuration
-SECRET_KEY = "oryn-development-secret-change-this"
 ALGORITHM = "HS256"
+ACCESS_TOKEN_TTL = timedelta(hours=12)
+INSECURE_SECRET_VALUES = {
+    "",
+    "change-this-to-a-secure-random-secret",
+    "oryn-development-secret-change-this",
+    "replace-with-a-random-secret-at-least-32-characters",
+}
+
+
+def _get_secret_key():
+    secret = os.getenv("JWT_SECRET", "").strip()
+    if (
+        len(secret) < 32
+        or secret in INSECURE_SECRET_VALUES
+        or secret.lower().startswith(
+            ("change-this", "replace-with", "oryn-development")
+        )
+    ):
+        raise HTTPException(
+            status_code=503,
+            detail="Authentication is not configured. Set JWT_SECRET to a random secret of at least 32 characters.",
+        )
+    return secret
+
+
+def _create_access_token(user):
+    now = datetime.now(timezone.utc)
+    return jwt.encode(
+        {
+            "sub": str(user.id),
+            "email": user.email,
+            "iat": now,
+            "exp": now + ACCESS_TOKEN_TTL,
+        },
+        _get_secret_key(),
+        algorithm=ALGORITHM,
+    )
 
 
 router = APIRouter(
@@ -49,6 +87,9 @@ def register(
             detail="email and password are required",
         )
 
+    # Validate auth configuration before creating a database row.
+    _get_secret_key()
+
     existing_user = db.scalar(
         select(User).where(
             User.email == email
@@ -72,9 +113,13 @@ def register(
     db.commit()
     db.refresh(user)
 
+    # Return the same authentication contract as login. The desktop
+    # client immediately persists access_token after registration.
     return {
         "id": user.id,
         "email": user.email,
+        "access_token": _create_access_token(user),
+        "token_type": "bearer",
     }
 
 
@@ -112,18 +157,8 @@ def login(
             detail="Invalid email or password",
         )
 
-    # CHANGED: Create JWT containing the user ID
-    token = jwt.encode(
-        {
-            "sub": str(user.id),
-            "email": user.email,
-        },
-        SECRET_KEY,
-        algorithm=ALGORITHM,
-    )
-
     return {
-        "access_token": token,
+        "access_token": _create_access_token(user),
         "token_type": "bearer",
     }
 
@@ -145,13 +180,13 @@ def get_current_user(
 
         payload = jwt.decode(
             token,
-            SECRET_KEY,
+            _get_secret_key(),
             algorithms=[ALGORITHM],
+            options={"require": ["sub", "exp", "iat"]},
         )
 
         user_id = payload.get("sub")
-
-        if not user_id:
+        if not isinstance(user_id, str) or not user_id.isdigit():
             raise HTTPException(
                 status_code=401,
                 detail="Invalid token",

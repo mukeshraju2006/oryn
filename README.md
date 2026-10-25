@@ -222,7 +222,7 @@ Download the Linux AppImage from the GitHub Releases page.
 Example:
 
 ```text
-Oryn-0.1.0-linux-x86_64.AppImage
+Oryn-0.1.0-x86_64.AppImage
 ```
 
 Make it executable:
@@ -370,7 +370,7 @@ oryn/
 
 ## Requirements
 
-- Python 3.11+
+- Python 3.12+
 - Git
 - Google Chrome
 - VS Code
@@ -511,7 +511,7 @@ The backend provides APIs for:
 - Workspaces
 - Snapshots
 
-The desktop application communicates with the backend over HTTPS.
+The desktop application communicates with the backend over HTTPS. Set `ORYN_API_URL` to the canonical deployed backend URL if the default host changes.
 
 Server-side secrets must never be included in the desktop application or committed to the repository.
 
@@ -526,7 +526,7 @@ Oryn currently uses:
 - User-scoped workspaces
 - User-scoped snapshots
 
-Environment files containing secrets should never be committed.
+Environment files containing secrets should never be committed. The backend requires a strong `JWT_SECRET` (at least 32 characters); the example placeholder is not a production secret. Access tokens expire after 12 hours, so users may need to log in again.
 
 Use:
 
