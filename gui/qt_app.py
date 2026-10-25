@@ -754,7 +754,8 @@ class DashboardView(QWidget):
             self.activity.takeItem(self.activity.count() - 1)
         self.status_label.setText(message)
 
-    def _task(self, function, success, activity, on_progress=None):
+    def _task(self, function, success, activity, on_progress=None, cancellable=False):
+        self._allow_cancel = cancellable
         self._set_busy(True)
         if hasattr(self.client, "last_request_metrics"):
             self.client.last_request_metrics = None
@@ -805,7 +806,8 @@ class DashboardView(QWidget):
     def _update_cancel_visibility(self):
         task = getattr(self, "current_task", None)
         can_cancel = bool(
-            self.busy and task is not None and task.reports_progress and task.isRunning()
+            self.busy and getattr(self, "_allow_cancel", False)
+            and task is not None and task.reports_progress and task.isRunning()
         )
         self.cancel_button.setVisible(can_cancel)
         self.cancel_button.setEnabled(can_cancel)
@@ -1169,6 +1171,7 @@ class DashboardView(QWidget):
             self._capture_done,
             "Starting workspace capture…",
             on_progress=self._log,
+            cancellable=True,
         )
 
     def _capture_done(self, result):
