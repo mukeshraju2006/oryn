@@ -96,7 +96,7 @@ class CloudClient:
         )
 
         with urllib.request.urlopen(
-            request
+            request, timeout=self.timeout
         ) as response:
 
             result = json.loads(
@@ -145,7 +145,7 @@ class CloudClient:
         )
 
         with urllib.request.urlopen(
-            request
+            request, timeout=self.timeout
         ) as response:
 
             return json.loads(
