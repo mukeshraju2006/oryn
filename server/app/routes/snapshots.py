@@ -71,9 +71,19 @@ def create_snapshot(
         db,
     )
 
+    version = data.get("version", 1)
+    if isinstance(version, bool) or not isinstance(version, int) or version < 1:
+        raise HTTPException(status_code=422, detail="Snapshot version must be a positive integer.")
+
+    # Limit persisted snapshot size to protect the database from accidental
+    # huge payloads and unbounded client uploads.
+    payload_size = len(json.dumps(data, separators=(",", ":"), ensure_ascii=False).encode("utf-8"))
+    if payload_size > MAX_SNAPSHOT_BYTES:
+        raise HTTPException(status_code=413, detail="Snapshot exceeds the 8 MiB limit.")
+
     snapshot = Snapshot(
         workspace_id=workspace_id,
-        version=data.get("version", 1),
+        version=version,
         data=data,
     )
 
