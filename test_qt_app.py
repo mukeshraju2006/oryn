@@ -8,7 +8,7 @@ import pytest
 from PySide6.QtWidgets import QApplication
 from urllib.error import HTTPError
 
-from gui.qt_app import AuthView, error_message
+from gui.qt_app import AuthView, DashboardView, error_message
 
 
 @pytest.fixture(scope="session")
@@ -44,3 +44,40 @@ def test_http_error_shows_safe_api_detail():
         io.BytesIO(b'{"detail":"Invalid email or password"}'),
     )
     assert error_message(error) == "API error 401: Invalid email or password"
+
+
+
+def test_dashboard_snapshot_rows_have_restore_details_and_delete(qt_app, monkeypatch):
+    monkeypatch.setattr(DashboardView, "load_workspaces", lambda self: None)
+
+    class DummyClient:
+        base_url = "https://example.invalid"
+
+    view = DashboardView(DummyClient())
+    view.workspace_id = 17
+    view.snapshots = [{
+        "id": 101,
+        "snapshot_number": 1,
+        "application": "vscode",
+        "created_at": "2026-10-25T12:00:00",
+        "version": 5,
+        "file_count": 3,
+        "project_path": "/tmp/demo",
+    }]
+    view._render_snapshots()
+
+    assert view.snapshot_table.columnCount() == 7
+    assert view.snapshot_table.rowCount() == 1
+    actions = view.snapshot_table.cellWidget(0, 6)
+    assert actions is not None
+    assert {button.text() for button in actions.findChildren(__import__(
+        "PySide6.QtWidgets", fromlist=["QPushButton"]
+    ).QPushButton)} >= {"Restore", "Details", "Delete"}
+    assert view.snapshot_table.item(0, 0).data(0x0100) == 101
+    view.close()
+
+
+def test_url_error_includes_readable_reason():
+    from urllib.error import URLError
+
+    assert "Temporary failure" in error_message(URLError("Temporary failure"))
