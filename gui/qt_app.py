@@ -1217,23 +1217,39 @@ class DashboardView(QWidget):
         if answer != QMessageBox.Yes:
             return
 
-        def operation():
+        def operation(progress):
             restore_started = time.perf_counter()
             app_type = snapshot.get("application")
+            vscode_ok = None
+            vscode_error = None
             if app_type == "vscode":
-                vscode_ok = VSCodeAdapter().restore(snapshot)
-                if not vscode_ok:
-                    raise RuntimeError(
-                        "VS Code restore did not complete. Review the terminal output for details."
-                    )
+                progress("Restoring VS Code workspace and editor state…")
+                try:
+                    vscode_ok = VSCodeAdapter().restore(snapshot)
+                    if not vscode_ok:
+                        vscode_error = (
+                            "VS Code restore did not complete. Review terminal output for details."
+                        )
+                except Exception as exc:
+                    # Continue with browser restoration even if editor restoration fails.
+                    vscode_ok = False
+                    vscode_error = str(exc) or exc.__class__.__name__
+            progress("Opening saved browser tabs…")
             opened_urls = BrowserAdapter().restore_urls(urls)
             return {
                 "urls": opened_urls,
                 "application": app_type,
                 "files": len(files),
+                "vscode_ok": vscode_ok,
+                "vscode_error": vscode_error,
                 "restore_seconds": time.perf_counter() - restore_started,
             }
-        self._task(operation, self._restore_done, "Restoring selected snapshot…")
+        self._task(
+            operation,
+            self._restore_done,
+            "Restoring selected snapshot…",
+            on_progress=self._log,
+        )
 
     def compare_selected_snapshots(self):
         if self.busy:
@@ -1316,6 +1332,16 @@ class DashboardView(QWidget):
         dialog.exec()
 
     def _restore_done(self, result):
+        if result.get("vscode_ok") is False:
+            message = (
+                "Oryn completed a partial restore. Browser tabs were processed, "
+                "but VS Code restoration failed.\n\n"
+                f"Details: {result.get('vscode_error') or 'No additional error details were returned.'}\n"
+                f"Browser tabs requested: {result.get('urls', 0)}"
+            )
+            self._log("Partial restore · VS Code failed; browser restoration was still attempted")
+            show_error_dialog(self, message)
+            return
         self._log(
             f"Restore finished · {result['application']} · "
             f"{result['urls']} browser tab(s) requested · "
