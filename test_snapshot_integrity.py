@@ -9,7 +9,7 @@ from oryn.core.snapshot import migrate_snapshot_data
 
 
 def with_integrity(payload):
-    canonical = json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    canonical = json.dumps(payload, separators=(",", ":"), ensure_ascii=False, sort_keys=True).encode("utf-8")
     result = dict(payload)
     result["_integrity"] = {
         "algorithm": "sha256",

@@ -190,7 +190,7 @@ class CloudClient:
         # substantially reduces text-heavy project snapshots over slow links.
         payload = snapshot.to_dict()
         canonical = json.dumps(
-            payload, separators=(",", ":"), ensure_ascii=False
+            payload, separators=(",", ":"), ensure_ascii=False, sort_keys=True
         ).encode("utf-8")
         payload["_integrity"] = {
             "algorithm": "sha256",

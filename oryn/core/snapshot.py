@@ -33,7 +33,7 @@ def migrate_snapshot_data(data):
         unsigned = dict(migrated)
         unsigned.pop("_integrity", None)
         canonical = json.dumps(
-            unsigned, separators=(",", ":"), ensure_ascii=False
+            unsigned, separators=(",", ":"), ensure_ascii=False, sort_keys=True
         ).encode("utf-8")
         actual_digest = hashlib.sha256(canonical).hexdigest()
         if not hmac.compare_digest(expected_digest, actual_digest):
