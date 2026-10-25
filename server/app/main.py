@@ -1,6 +1,7 @@
 import gzip
 import io
 import os
+import time
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
@@ -35,6 +36,15 @@ app = FastAPI(
     title="Oryn Cloud",
     version="0.1.0",
 )
+
+
+@app.middleware("http")
+async def add_process_time_header(request: Request, call_next):
+    """Expose server-side request duration for client diagnostics."""
+    started = time.perf_counter()
+    response = await call_next(request)
+    response.headers["X-Oryn-Process-Time"] = f"{time.perf_counter() - started:.6f}"
+    return response
 
 
 @app.middleware("http")

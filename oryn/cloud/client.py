@@ -1,7 +1,9 @@
 import gzip
 import json
 import os
+import time
 import urllib.request
+from urllib.parse import urlsplit
 
 
 class CloudClient:
@@ -28,6 +30,7 @@ class CloudClient:
             self.timeout = 30.0
 
         self.token = token
+        self.last_request_metrics = None
 
     # CHANGED:
     # Register a new Oryn user.
@@ -57,15 +60,17 @@ class CloudClient:
             method="POST",
         )
 
+        started = time.perf_counter()
         with urllib.request.urlopen(
             request, timeout=self.timeout
         ) as response:
-
-            return json.loads(
-                response.read().decode(
-                    "utf-8"
-                )
+            raw = response.read()
+            result = json.loads(raw.decode("utf-8"))
+            self._record_request_metrics(
+                "POST", url, started, response.status,
+                response.headers.get("X-Oryn-Process-Time"), len(raw),
             )
+            return result
 
     # CHANGED:
     # Login and receive JWT.
@@ -95,14 +100,15 @@ class CloudClient:
             method="POST",
         )
 
+        started = time.perf_counter()
         with urllib.request.urlopen(
             request, timeout=self.timeout
         ) as response:
-
-            result = json.loads(
-                response.read().decode(
-                    "utf-8"
-                )
+            raw = response.read()
+            result = json.loads(raw.decode("utf-8"))
+            self._record_request_metrics(
+                "POST", url, started, response.status,
+                response.headers.get("X-Oryn-Process-Time"), len(raw),
             )
 
         # CHANGED:
@@ -144,15 +150,31 @@ class CloudClient:
             method=method,
         )
 
+        started = time.perf_counter()
         with urllib.request.urlopen(
             request, timeout=self.timeout
         ) as response:
-
-            return json.loads(
-                response.read().decode(
-                    "utf-8"
-                )
+            raw = response.read()
+            result = json.loads(raw.decode("utf-8"))
+            self._record_request_metrics(
+                method, url, started, response.status,
+                response.headers.get("X-Oryn-Process-Time"), len(raw),
             )
+            return result
+
+    def _record_request_metrics(self, method, url, started, status, server_seconds, response_bytes):
+        try:
+            server_seconds = float(server_seconds) if server_seconds is not None else None
+        except (TypeError, ValueError):
+            server_seconds = None
+        self.last_request_metrics = {
+            "method": method,
+            "path": urlsplit(url).path,
+            "seconds": time.perf_counter() - started,
+            "server_seconds": server_seconds,
+            "status": status,
+            "response_bytes": response_bytes,
+        }
 
     # CHANGED:
     # Create an authenticated snapshot.

@@ -721,6 +721,14 @@ class DashboardView(QWidget):
         self._set_busy(True)
         def done(result):
             self._set_busy(False)
+            metrics = getattr(self.client, "last_request_metrics", None)
+            if metrics and metrics.get("seconds", 0) >= 1.0:
+                server = metrics.get("server_seconds")
+                server_text = f", API {server:.2f}s" if server is not None else ""
+                self._log(
+                    f"Slow request: {metrics.get('method')} {metrics.get('path')} "
+                    f"took {metrics['seconds']:.2f}s{server_text}"
+                )
             success(result)
         def failed(message):
             self._set_busy(False)
@@ -1205,11 +1213,13 @@ class DashboardView(QWidget):
                     raise RuntimeError(
                         "VS Code restore did not complete. Review the terminal output for details."
                     )
+            restore_started = time.perf_counter()
             opened_urls = BrowserAdapter().restore_urls(urls)
             return {
                 "urls": opened_urls,
                 "application": app_type,
                 "files": len(files),
+                "restore_seconds": time.perf_counter() - restore_started,
             }
         self._task(operation, self._restore_done, "Restoring selected snapshot…")
 
@@ -1294,7 +1304,11 @@ class DashboardView(QWidget):
         dialog.exec()
 
     def _restore_done(self, result):
-        self._log(f"Restore finished · {result['application']} · {result['urls']} browser tab(s) requested")
+        self._log(
+            f"Restore finished · {result['application']} · "
+            f"{result['urls']} browser tab(s) requested · "
+            f"{result.get('restore_seconds', 0):.1f}s"
+        )
 
     def logout(self):
         answer = QMessageBox.question(self, "Sign out", "Sign out of Oryn on this device?", QMessageBox.Yes | QMessageBox.Cancel, QMessageBox.Cancel)
