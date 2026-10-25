@@ -13,7 +13,7 @@ from server.app.database import Base
 from server.app.models.snapshot import Snapshot
 from server.app.models.user import User
 from server.app.models.workspace import Workspace
-from server.app.routes.snapshots import delete_snapshot
+from server.app.routes.snapshots import delete_snapshot, prune_snapshots
 from server.app.routes.workspaces import rename_workspace, delete_workspace
 
 
@@ -79,3 +79,29 @@ def test_delete_snapshot_is_scoped_to_workspace_and_owner(db_and_user):
     result = delete_snapshot(workspace.id, snapshot.id, db, user)
     assert result == {"deleted": True, "snapshot_id": snapshot.id}
     assert db.get(Snapshot, snapshot.id) is None
+
+
+
+def test_retention_keeps_newest_snapshots_and_deletes_older_ones(db_and_user):
+    db, user, _, workspace = db_and_user
+    for index in range(4):
+        db.add(Snapshot(
+            workspace_id=workspace.id,
+            version=1,
+            data={"application": "vscode", "marker": index},
+        ))
+    db.commit()
+    result = prune_snapshots(workspace.id, {"keep_last": 2}, db, user)
+    assert result["deleted_count"] == 2
+    assert result["kept_count"] == 2
+    remaining = db.scalars(
+        select(Snapshot).where(Snapshot.workspace_id == workspace.id)
+    ).all()
+    assert sorted(item.data["marker"] for item in remaining) == [2, 3]
+
+
+def test_retention_rejects_invalid_limits(db_and_user):
+    db, user, _, workspace = db_and_user
+    with pytest.raises(HTTPException) as error:
+        prune_snapshots(workspace.id, {"keep_last": True}, db, user)
+    assert error.value.status_code == 422
