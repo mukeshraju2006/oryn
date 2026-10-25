@@ -215,8 +215,11 @@ class VSCodeAdapter:
                 text=True,
                 encoding="utf-8",
                 errors="replace",
+                timeout=3.0,
+                timeout=3.0,
+                timeout=3.0,
             )
-        except OSError as error:
+        except (OSError, subprocess.TimeoutExpired) as error:
             print(f"Could not query VS Code status: {error}")
             return None
 
@@ -420,7 +423,7 @@ class VSCodeAdapter:
                 encoding="utf-8",
                 errors="replace",
             )
-        except OSError:
+        except (OSError, subprocess.TimeoutExpired):
             status = None
 
         if status and status.returncode == 0:
@@ -455,7 +458,7 @@ class VSCodeAdapter:
                 encoding="utf-8",
                 errors="replace",
             )
-        except OSError:
+        except (OSError, subprocess.TimeoutExpired):
             return None
 
         if status.returncode != 0:
@@ -886,6 +889,7 @@ class VSCodeAdapter:
         self,
         workspace_path,
         files,
+        progress=None,
     ):
         workspace = Path(
             workspace_path
@@ -1014,6 +1018,7 @@ class VSCodeAdapter:
         # CHANGED:
         # os.walk lets us prune dependency/cache directories before
         # entering them, instead of recursively scanning their contents.
+        scanned_files = 0
         for (
             current_root,
             directory_names,
@@ -1028,11 +1033,9 @@ class VSCodeAdapter:
                 name
                 for name in directory_names
                 if (
-                    name
-                    not in excluded_directories
-                    and not (
-                        current_path / name
-                    ).is_symlink()
+                    name not in excluded_directories
+                    and not name.startswith(".venv")
+                    and not (current_path / name).is_symlink()
                 )
             )
 
@@ -1055,9 +1058,10 @@ class VSCodeAdapter:
                 except ValueError:
                     continue
 
-            for file_name in sorted(
-                file_names
-            ):
+            for file_name in sorted(file_names):
+                scanned_files += 1
+                if progress and scanned_files % 100 == 0:
+                    progress(f"Scanning project files… {scanned_files} checked")
                 # Exclude secrets even if they are inside the project tree;
                 # .gitignore is not consulted by this filesystem walk.
                 if is_sensitive_file(file_name):
@@ -1116,6 +1120,9 @@ class VSCodeAdapter:
                         f"Could not capture project file "
                         f"{file_path}: {error}"
                     )
+
+        if progress:
+            progress(f"Project scan complete: {len(project_files)} files captured")
 
         return {
             "root": ".",
@@ -2172,7 +2179,7 @@ class VSCodeAdapter:
 
         return True
 
-    def capture(self):
+    def capture(self, progress=None):
         active_file = self.get_active_file()
 
         workspace = self.find_workspace_storage(
@@ -2358,6 +2365,7 @@ class VSCodeAdapter:
                     ]
                 ),
                 files,
+                progress=progress,
             ),
         )
 

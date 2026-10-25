@@ -280,12 +280,15 @@ class AuthView(QWidget):
             return
 
         self.submit_button.setEnabled(False)
-        self.message.setText("Connecting securely…")
+        self.message.setText("Connecting to Oryn Cloud…")
         client = CloudClient()
+        register_mode = self.register_mode
 
-        def operation():
-            if self.register_mode:
+        def operation(progress):
+            if register_mode:
+                progress("Creating your Oryn account…")
                 client.register(email, password)
+            progress("Authenticating with Oryn Cloud…")
             client.login(email, password)
             return client
 
@@ -303,7 +306,7 @@ class AuthView(QWidget):
             self.submit_button.setEnabled(True)
             self.message.setText(message)
 
-        run_task(self, operation, success, failure)
+        run_task(self, operation, success, failure, on_progress=self.message.setText)
 
 
 class SnapshotChart(QWidget):
@@ -721,7 +724,7 @@ class DashboardView(QWidget):
         workspaces_count = len(self.workspaces)
         def operation(progress):
             progress("Inspecting VS Code workspace and editor state…")
-            snapshot = VSCodeAdapter().capture()
+            snapshot = VSCodeAdapter().capture(progress=progress)
             progress("Reading Chrome session data…")
             browser_urls = BrowserAdapter().capture_urls()
             if snapshot is not None:

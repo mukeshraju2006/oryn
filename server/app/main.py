@@ -1,5 +1,6 @@
 import gzip
 import io
+import os
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
@@ -86,9 +87,11 @@ async def decompress_snapshot_upload(request: Request, call_next):
     return await call_next(request)
 
 
-Base.metadata.create_all(
-    bind=engine
-)
+# Vercel imports the ASGI app on cold starts. Avoid schema introspection against
+# Neon before every first request; production schema is provisioned separately.
+# Local development keeps the convenient automatic table creation behavior.
+if os.getenv("VERCEL") != "1":
+    Base.metadata.create_all(bind=engine)
 
 
 app.include_router(
