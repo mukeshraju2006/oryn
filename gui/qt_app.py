@@ -600,7 +600,7 @@ class DashboardView(QWidget):
         table_col.addLayout(filter_row)
         self.snapshot_table = QTableWidget(0, 7)
         self.snapshot_table.setHorizontalHeaderLabels(
-            ["SNAPSHOT", "APPLICATION", "CAPTURED", "FILES", "PROJECT", "FORMAT", "ACTIONS"]
+            ["SNAPSHOT", "APPLICATION", "CAPTURED", "OPEN FILES", "PROJECT", "FORMAT", "ACTIONS"]
         )
         self.snapshot_table.verticalHeader().setVisible(False)
         self.snapshot_table.setShowGrid(False)
@@ -1209,7 +1209,7 @@ class DashboardView(QWidget):
             f"Version: {snapshot.get('version', '—')}",
             f"Project path: {workspace.get('path') or 'Not recorded'}",
             f"Active file: {snapshot.get('active_file') or 'Not recorded'}",
-            f"Captured files: {len(files)}",
+            f"Open editor files: {len(files)}",
             f"Browser URLs: {len(urls)}",
             f"Project payload entries: {len(project.get('files') or []) if isinstance(project, dict) else 'Not available'}",
         ]
@@ -1371,21 +1371,28 @@ class DashboardView(QWidget):
     def _show_snapshot_comparison(self, entries, left, right):
         def project_path(data):
             return (data.get("workspace") or {}).get("path") or "Not recorded"
-        def file_paths(data):
+        def file_paths(items):
             return sorted(
                 item.get("path", "?")
-                for item in data.get("files", [])
+                for item in items or []
                 if isinstance(item, dict)
             )
+        def editor_paths(data):
+            return file_paths(data.get("files") or [])
+        def project_files(data):
+            project = data.get("project") or {}
+            return file_paths(project.get("files") or []) if isinstance(project, dict) else []
         def browser_urls(data):
             return sorted(data.get("browser_urls") or [])
         comparisons = [
             ("Application", left.get("application"), right.get("application")),
             ("Project path", project_path(left), project_path(right)),
             ("Active file", left.get("active_file"), right.get("active_file")),
-            ("Editor file count", len(left.get("files") or []), len(right.get("files") or [])),
+            ("Open editor file count", len(left.get("files") or []), len(right.get("files") or [])),
+            ("Project file count", len(project_files(left)), len(project_files(right))),
+            ("Open editor file paths", editor_paths(left), editor_paths(right)),
+            ("Project file paths", project_files(left), project_files(right)),
             ("Browser tab count", len(left.get("browser_urls") or []), len(right.get("browser_urls") or [])),
-            ("Project file list", file_paths(left), file_paths(right)),
             ("Browser URL set", browser_urls(left), browser_urls(right)),
         ]
         changed = [
