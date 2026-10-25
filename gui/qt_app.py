@@ -580,8 +580,15 @@ class DashboardView(QWidget):
             self.snapshot_table.horizontalHeader().setSectionResizeMode(
                 column, QHeaderView.ResizeToContents
             )
+        self.snapshot_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.Stretch)
+        self.snapshot_table.horizontalHeader().setSectionResizeMode(6, QHeaderView.ResizeToContents)
         self.snapshot_table.setMinimumHeight(190)
         self.snapshot_table.itemSelectionChanged.connect(self._selection_changed)
+        self.snapshot_empty_label = make_label(
+            "No snapshots yet. Capture a workspace to create your first snapshot.",
+            muted=True,
+        )
+        table_col.addWidget(self.snapshot_empty_label)
         table_col.addWidget(self.snapshot_table)
         scroll.setWidget(content)
 
@@ -744,7 +751,9 @@ class DashboardView(QWidget):
         self.snapshot_search.setEnabled(not busy)
         self.snapshot_table.setEnabled(not busy)
         self.workspace_table.setEnabled(not busy)
-        self.compare_button.setEnabled(not busy)
+        self.compare_button.setEnabled(
+            not busy and len(self.snapshot_table.selectionModel().selectedRows()) == 2
+        )
         self.retention_button.setEnabled(not busy and self.workspace_id is not None)
         self.logout_button.setEnabled(not busy)
 
@@ -881,6 +890,12 @@ class DashboardView(QWidget):
             self.snapshot_count_label.setText(
                 f"{visible} shown · {total} total" if query else f"{total} record(s)"
             )
+        if hasattr(self, "snapshot_empty_label"):
+            self.snapshot_empty_label.setVisible(visible == 0)
+            if self.snapshots:
+                self.snapshot_empty_label.setText(
+                    "No snapshots match your search." if query else "No snapshots in this workspace yet."
+                )
 
     def rename_workspace(self):
         if self.busy or self.workspace_id is None:

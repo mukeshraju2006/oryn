@@ -95,9 +95,9 @@ def create_snapshot(
     db.commit()
     db.refresh(snapshot)
 
-    # Display numbers are local to this workspace, not global to the account.
-    # They remain stable as long as snapshots are retained; deletion/retention
-    # will require a persisted per-workspace sequence before it is introduced.
+    # Display numbers are the ordinal position within this workspace's retained
+    # history. Deletion/retention compacts the displayed sequence; the database ID
+    # remains the stable identifier used by all actions.
     snapshot_number = db.scalar(
         select(func.count(Snapshot.id))
         .where(
