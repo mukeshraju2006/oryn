@@ -559,9 +559,9 @@ class DashboardView(QWidget):
         self.snapshot_search.textChanged.connect(self._filter_snapshots)
         filter_row.addWidget(self.snapshot_search, 1)
         table_col.addLayout(filter_row)
-        self.snapshot_table = QTableWidget(0, 7)
+        self.snapshot_table = QTableWidget(0, 6)
         self.snapshot_table.setHorizontalHeaderLabels(
-            ["SNAPSHOT", "APPLICATION", "CAPTURED", "FILES", "FORMAT", "DETAILS", "ACTIONS"]
+            ["SNAPSHOT", "APPLICATION", "CAPTURED", "FILES", "FORMAT", "ACTIONS"]
         )
         self.snapshot_table.verticalHeader().setVisible(False)
         self.snapshot_table.setShowGrid(False)
@@ -569,7 +569,7 @@ class DashboardView(QWidget):
         self.snapshot_table.setSelectionMode(QAbstractItemView.SingleSelection)
         self.snapshot_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.snapshot_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
-        for column in range(1, 7):
+        for column in range(1, 6):
             self.snapshot_table.horizontalHeader().setSectionResizeMode(
                 column, QHeaderView.ResizeToContents
             )
@@ -745,8 +745,7 @@ class DashboardView(QWidget):
             action_layout.addWidget(details_button)
             action_layout.addWidget(restore_button)
             action_layout.addWidget(delete_button)
-            self.snapshot_table.setCellWidget(row, 5, details_button)
-            self.snapshot_table.setCellWidget(row, 6, actions)
+            self.snapshot_table.setCellWidget(row, 5, actions)
             self.snapshot_table.setRowHeight(row, 48)
         self._filter_snapshots(self.snapshot_search.text())
         self.snapshot_count_label.setText(f"{len(self.snapshots)} record(s)")
