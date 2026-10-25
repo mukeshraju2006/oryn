@@ -98,7 +98,7 @@ def test_snapshot_upload_prunes_largest_project_file_to_fit_gateway_limit(monkey
 
     # Deterministic incompressible content simulates binary assets that gzip
     # cannot shrink enough to pass the hosting request-body limit.
-    random_bytes = random.Random(42).randbytes(3_000_000)
+    random_bytes = random.Random(42).randbytes(4_000_000)
     encoded = base64.b64encode(random_bytes).decode("ascii")
 
     def fake_request(url, data=None, method="GET", content_encoding=None):

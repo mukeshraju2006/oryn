@@ -105,6 +105,18 @@ def error_message(exc: Exception) -> str:
                 return f"API error {exc.code}: {detail}"
         except (ValueError, AttributeError):
             pass
+        if exc.code == 413:
+            return (
+                "The cloud host rejected this snapshot because the upload is too large "
+                "(HTTP 413). Update Oryn to the latest version and retry; the updated "
+                "client reduces oversized project payloads and reports any omitted files."
+            )
+        try:
+            body = exc.read().decode("utf-8", errors="replace").strip()
+            if body and len(body) <= 500:
+                return f"API request failed (HTTP {exc.code}): {body}"
+        except (OSError, AttributeError):
+            pass
         return f"API request failed (HTTP {exc.code})."
     if isinstance(exc, URLError):
         reason = getattr(exc, "reason", None)
