@@ -1,0 +1,5 @@
+-r requirements.txt
+chromium-session
+pyautogui
+pyperclip
+PySide6-Essentials
