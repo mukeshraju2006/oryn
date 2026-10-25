@@ -1187,9 +1187,21 @@ class DashboardView(QWidget):
         urls = snapshot.get("browser_urls") or []
         project = snapshot.get("project") or {}
         project_files = project.get("files") or [] if isinstance(project, dict) else []
+        source_path = workspace.get("path")
+        destination = (
+            VSCodeAdapter().map_workspace_to_current_home(source_path)
+            if source_path else None
+        )
+        destination_text = str(destination) if destination else "Not applicable"
+        destination_state = (
+            "already exists" if destination and destination.exists()
+            else "will be recreated if project data is available" if destination
+            else "not available"
+        )
         preview = [
             f"Application: {snapshot.get('application') or 'workspace'}",
-            f"Project path: {workspace.get('path') or 'Not recorded'}",
+            f"Original project path: {source_path or 'Not recorded'}",
+            f"Restore destination: {destination_text} ({destination_state})",
             f"Editor files: {len(files)}",
             f"Project files stored for recovery: {len(project_files)}",
             f"Browser tabs to open: {len(urls)}",
@@ -1206,6 +1218,7 @@ class DashboardView(QWidget):
             return
 
         def operation():
+            restore_started = time.perf_counter()
             app_type = snapshot.get("application")
             if app_type == "vscode":
                 vscode_ok = VSCodeAdapter().restore(snapshot)
@@ -1213,7 +1226,6 @@ class DashboardView(QWidget):
                     raise RuntimeError(
                         "VS Code restore did not complete. Review the terminal output for details."
                     )
-            restore_started = time.perf_counter()
             opened_urls = BrowserAdapter().restore_urls(urls)
             return {
                 "urls": opened_urls,
