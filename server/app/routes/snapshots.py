@@ -25,6 +25,8 @@ router = APIRouter(
     tags=["snapshots"],
 )
 
+MAX_SNAPSHOT_BYTES = 8 * 1024 * 1024
+
 
 # CHANGED:
 # Verify that the workspace belongs to
