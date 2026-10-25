@@ -41,13 +41,33 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r requirements-desktop.txt pytest
 
-      - name: Audit Python dependencies
+      - name: Audit backend dependencies
         run: |
           python -m pip install pip-audit
           pip-audit -r requirements.txt
+
+      - name: Audit desktop dependencies
+        run: pip-audit -r requirements-desktop.txt
 
       - name: Compile Python sources
         run: python -m compileall -q oryn gui server test_path_mapping.py test_cloud.py test_browser.py test_gui_launch.py test_snapshot_numbering.py test_qt_app.py test_auth_validation.py
 
       - name: Run non-GUI regression tests
         run: python -m pytest -q test_path_mapping.py test_snapshot_numbering.py test_qt_app.py test_auth_validation.py
+
+      - name: Smoke-test production API and database
+        if: runner.os == 'Linux' && github.ref == 'refs/heads/main' && github.event_name == 'push'
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 30); do
+            response="$(curl --silent --show-error --fail --max-time 10 https://oryn-cloud-rebuild.vercel.app/ 2>/dev/null || true)"
+            if RESPONSE="$response" python -c 'import json, os; data=json.loads(os.environ["RESPONSE"]); assert data.get("status") == "running" and data.get("name") == "Oryn Cloud"' 2>/dev/null; then
+              echo "Production API responded successfully and initialized its database."
+              exit 0
+            fi
+            echo "Waiting for Vercel deployment (attempt $attempt/30)..."
+            sleep 10
+          done
+          echo "Production API did not return the expected health response within 5 minutes."
+          exit 1
