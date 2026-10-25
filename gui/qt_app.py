@@ -17,7 +17,7 @@ from PySide6.QtGui import QColor, QFont, QPainter, QPen, QBrush
 from PySide6.QtWidgets import (
     QApplication, QComboBox, QFrame, QGridLayout, QHBoxLayout, QLabel,
     QLineEdit, QListWidget, QListWidgetItem, QMainWindow, QMessageBox,
-    QPushButton, QScrollArea, QSizePolicy, QStackedWidget, QTableWidget,
+    QDialog, QPlainTextEdit, QPushButton, QScrollArea, QSizePolicy, QStackedWidget, QTableWidget,
     QTableWidgetItem, QVBoxLayout, QWidget, QHeaderView, QInputDialog,
     QAbstractItemView,
 )
@@ -62,6 +62,19 @@ QPushButton:hover { background: #20283a; border-color: #414c63; }
 QPushButton:disabled { color: #697386; background: #141923; border-color: #222a37; }
 QPushButton#primary { background: #8875ff; color: white; border: 1px solid #8875ff; }
 QPushButton#primary:hover { background: #9a8aff; }
+QPushButton#danger { background: #351a23; color: #ffdce2; border: 1px solid #703342; }
+QPushButton#danger:hover { background: #4a202c; border-color: #a44a60; }
+QPushButton#tableAction { padding: 5px 8px; min-width: 54px; min-height: 28px; max-height: 30px; border-radius: 6px; font-size: 11px; }
+QDialog { background: #10151f; color: #eef1f8; }
+QLabel#dialogTitle { color: #f4f5fb; font-size: 18px; font-weight: 750; }
+QLabel#dialogBody { color: #cbd3e2; font-size: 13px; }
+QPlainTextEdit#dialogDetails { background: #0b0f17; color: #dce3f1; border: 1px solid #2b3445; border-radius: 8px; padding: 8px; selection-background-color: #5548a5; }
+QPushButton#dialogPrimary, QPushButton#dialogDanger, QPushButton#dialogSecondary { min-width: 100px; min-height: 34px; padding: 7px 14px; }
+QPushButton#dialogPrimary { background: #8875ff; color: white; border: 1px solid #8875ff; }
+QPushButton#dialogPrimary:hover { background: #9a8aff; }
+QPushButton#dialogDanger { background: #8e3046; color: white; border: 1px solid #a8445b; }
+QPushButton#dialogDanger:hover { background: #a33b54; }
+QPushButton#dialogSecondary { background: #1b2230; color: #e2e7f2; border: 1px solid #354055; }
 QPushButton#nav { background: transparent; border: none; color: #8994a9; text-align: left; padding: 12px 14px; border-radius: 9px; font-weight: 600; }
 QPushButton#nav:hover { background: #171e2b; color: #f2f4fb; }
 QPushButton#navActive { background: #24213a; color: #c6bcff; border: 1px solid #383253; text-align: left; padding: 12px 14px; border-radius: 9px; font-weight: 700; }
@@ -101,21 +114,127 @@ def error_message(exc: Exception) -> str:
     return str(exc) or exc.__class__.__name__
 
 
+def show_message_dialog(parent, title: str, message: str, *, kind="info", details=None):
+    """Render a consistent, readable Oryn dialog instead of platform-dependent message boxes."""
+    dialog = QDialog(parent)
+    dialog.setWindowTitle(title)
+    dialog.setModal(True)
+    dialog.setMinimumWidth(520)
+    dialog.setMaximumWidth(760)
+    layout = QVBoxLayout(dialog)
+    layout.setContentsMargins(24, 22, 24, 20)
+    layout.setSpacing(12)
+
+    heading = QLabel(title)
+    heading.setObjectName("dialogTitle")
+    heading.setWordWrap(True)
+    layout.addWidget(heading)
+
+    body = QLabel(str(message))
+    body.setObjectName("dialogBody")
+    body.setWordWrap(True)
+    body.setTextInteractionFlags(Qt.TextSelectableByMouse | Qt.TextSelectableByKeyboard)
+    body.setMinimumWidth(450)
+    layout.addWidget(body)
+
+    if details:
+        detail_box = QPlainTextEdit()
+        detail_box.setObjectName("dialogDetails")
+        detail_box.setReadOnly(True)
+        detail_box.setPlainText(str(details))
+        detail_box.setMinimumHeight(150)
+        detail_box.setMaximumHeight(320)
+        layout.addWidget(detail_box)
+
+    buttons = QHBoxLayout()
+    buttons.addStretch(1)
+    close_button = QPushButton("Close")
+    close_button.setObjectName("dialogSecondary")
+    close_button.clicked.connect(dialog.accept)
+    buttons.addWidget(close_button)
+    layout.addLayout(buttons)
+    dialog.exec()
+
+
+def confirm_dialog(parent, title: str, message: str, *, confirm_label="Confirm", destructive=False):
+    """Return True only when the user deliberately confirms the described action."""
+    dialog = QDialog(parent)
+    dialog.setWindowTitle(title)
+    dialog.setModal(True)
+    dialog.setMinimumWidth(520)
+    dialog.setMaximumWidth(760)
+    layout = QVBoxLayout(dialog)
+    layout.setContentsMargins(24, 22, 24, 20)
+    layout.setSpacing(12)
+
+    heading = QLabel(title)
+    heading.setObjectName("dialogTitle")
+    heading.setWordWrap(True)
+    layout.addWidget(heading)
+
+    body = QLabel(str(message))
+    body.setObjectName("dialogBody")
+    body.setWordWrap(True)
+    body.setTextInteractionFlags(Qt.TextSelectableByMouse | Qt.TextSelectableByKeyboard)
+    body.setMinimumWidth(450)
+    layout.addWidget(body)
+
+    buttons = QHBoxLayout()
+    buttons.addStretch(1)
+    cancel_button = QPushButton("Cancel")
+    cancel_button.setObjectName("dialogSecondary")
+    cancel_button.clicked.connect(dialog.reject)
+    buttons.addWidget(cancel_button)
+    confirm_button = QPushButton(confirm_label)
+    confirm_button.setObjectName("dialogDanger" if destructive else "dialogPrimary")
+    confirm_button.clicked.connect(dialog.accept)
+    buttons.addWidget(confirm_button)
+    layout.addLayout(buttons)
+    return dialog.exec() == QDialog.Accepted
+
+
 def show_error_dialog(parent, message: str):
-    """Show long errors in a readable, selectable dialog with copy support."""
-    dialog = QMessageBox(parent)
-    dialog.setIcon(QMessageBox.Warning)
-    dialog.setWindowTitle("Oryn")
-    dialog.setText("Oryn couldn't complete the operation.")
-    dialog.setInformativeText(message)
-    dialog.setDetailedText(message)
-    dialog.setTextInteractionFlags(
-        Qt.TextSelectableByMouse | Qt.TextSelectableByKeyboard
-    )
+    """Show readable error details with a reliable copy action."""
+    dialog = QDialog(parent)
+    dialog.setWindowTitle("Oryn · Operation failed")
+    dialog.setModal(True)
     dialog.setMinimumWidth(560)
-    copy_button = dialog.addButton("Copy error", QMessageBox.ActionRole)
-    copy_button.clicked.connect(lambda: QApplication.clipboard().setText(message))
-    dialog.addButton(QMessageBox.Close)
+    dialog.setMaximumWidth(780)
+    layout = QVBoxLayout(dialog)
+    layout.setContentsMargins(24, 22, 24, 20)
+    layout.setSpacing(12)
+
+    heading = QLabel("Oryn couldn't complete the operation")
+    heading.setObjectName("dialogTitle")
+    heading.setWordWrap(True)
+    layout.addWidget(heading)
+
+    body = QLabel(str(message))
+    body.setObjectName("dialogBody")
+    body.setWordWrap(True)
+    body.setTextInteractionFlags(Qt.TextSelectableByMouse | Qt.TextSelectableByKeyboard)
+    body.setMinimumWidth(480)
+    layout.addWidget(body)
+
+    details = QPlainTextEdit()
+    details.setObjectName("dialogDetails")
+    details.setReadOnly(True)
+    details.setPlainText(str(message))
+    details.setMinimumHeight(100)
+    details.setMaximumHeight(260)
+    layout.addWidget(details)
+
+    buttons = QHBoxLayout()
+    buttons.addStretch(1)
+    copy_button = QPushButton("Copy details")
+    copy_button.setObjectName("dialogSecondary")
+    copy_button.clicked.connect(lambda: QApplication.clipboard().setText(str(message)))
+    buttons.addWidget(copy_button)
+    close_button = QPushButton("Close")
+    close_button.setObjectName("dialogPrimary")
+    close_button.clicked.connect(dialog.accept)
+    buttons.addWidget(close_button)
+    layout.addLayout(buttons)
     dialog.exec()
 
 
@@ -921,12 +1040,14 @@ class DashboardView(QWidget):
             snapshot_id = snapshot.get("id")
             workspace_id = self.workspace_id
             details_button = QPushButton("Details")
+            details_button.setObjectName("tableAction")
             details_button.clicked.connect(
                 lambda checked=False, sid=snapshot_id, wid=workspace_id, num=number:
                     self.show_snapshot_details(sid, wid, num)
             )
             restore_button = QPushButton("Restore")
-            restore_button.setObjectName("primary")
+            restore_button.setObjectName("tableAction")
+            restore_button.setStyleSheet("background:#383253;color:#f3f0ff;border:1px solid #5b4f91;")
             restore_button.clicked.connect(
                 lambda checked=False, sid=snapshot_id, wid=workspace_id:
                     self.restore_snapshot(snapshot_id=sid, workspace_id=wid)
@@ -936,6 +1057,8 @@ class DashboardView(QWidget):
             action_layout.setContentsMargins(2, 2, 2, 2)
             action_layout.setSpacing(4)
             delete_button = QPushButton("Delete")
+            delete_button.setObjectName("tableAction")
+            delete_button.setStyleSheet("background:#351a23;color:#ffdce2;border:1px solid #703342;")
             delete_button.clicked.connect(
                 lambda checked=False, sid=snapshot_id, wid=workspace_id, num=number:
                     self.delete_snapshot(sid, wid, num)
@@ -986,7 +1109,7 @@ class DashboardView(QWidget):
             return
         name = name.strip()
         if not name:
-            QMessageBox.information(self, "Workspace name", "Enter a workspace name.")
+            show_message_dialog(self, "Workspace name", "Enter a workspace name before continuing.")
             return
         workspace_id = self.workspace_id
         self._task(
@@ -1004,12 +1127,11 @@ class DashboardView(QWidget):
             return
         workspace_id = self.workspace_id
         name = self.workspace_combo.currentText()
-        answer = QMessageBox.warning(
+        if not confirm_dialog(
             self, "Delete workspace",
-            f"Delete '{name}' and every snapshot inside it? This cannot be undone.",
-            QMessageBox.Yes | QMessageBox.Cancel, QMessageBox.Cancel,
-        )
-        if answer != QMessageBox.Yes:
+            f"Delete workspace “{name}” and every snapshot inside it? This permanently removes its saved history.",
+            confirm_label="Delete workspace", destructive=True,
+        ):
             return
         self._task(
             lambda: self.client.delete_workspace(workspace_id),
@@ -1032,12 +1154,11 @@ class DashboardView(QWidget):
         )
         if not accepted:
             return
-        answer = QMessageBox.warning(
+        if not confirm_dialog(
             self, "Prune snapshot history",
-            f"Keep the newest {keep_last} snapshot(s) and permanently delete all older snapshots in this workspace?",
-            QMessageBox.Yes | QMessageBox.Cancel, QMessageBox.Cancel,
-        )
-        if answer != QMessageBox.Yes:
+            f"Keep the newest {keep_last} snapshots in this workspace and permanently delete every older snapshot? This cannot be undone.",
+            confirm_label="Apply retention", destructive=True,
+        ):
             return
         workspace_id = self.workspace_id
         self._task(
@@ -1055,12 +1176,11 @@ class DashboardView(QWidget):
     def delete_snapshot(self, snapshot_id, workspace_id, number):
         if self.busy or snapshot_id is None or workspace_id is None:
             return
-        answer = QMessageBox.warning(
+        if not confirm_dialog(
             self, "Delete snapshot",
-            f"Delete Snapshot {number}? This cannot be undone.",
-            QMessageBox.Yes | QMessageBox.Cancel, QMessageBox.Cancel,
-        )
-        if answer != QMessageBox.Yes:
+            f"Permanently delete Snapshot {number}? Its saved state cannot be recovered after deletion.",
+            confirm_label="Delete snapshot", destructive=True,
+        ):
             return
         self._task(
             lambda: self.client.delete_snapshot(workspace_id, snapshot_id),
@@ -1109,7 +1229,7 @@ class DashboardView(QWidget):
         if not accepted:
             return
         if not name:
-            QMessageBox.information(self, "Workspace name", "Enter a workspace name.")
+            show_message_dialog(self, "Workspace name", "Enter a workspace name before continuing.")
             return
         self._task(lambda: self.client.create_workspace(name), self._workspace_created, "Creating workspace…")
 
@@ -1215,17 +1335,12 @@ class DashboardView(QWidget):
         technical = "\n".join(details)
         if urls:
             technical += "\n\nBrowser URLs:\n" + "\n".join(str(url) for url in urls)
-        dialog = QMessageBox(self)
-        dialog.setWindowTitle(f"Snapshot {number} details")
-        dialog.setIcon(QMessageBox.Information)
-        dialog.setText(f"Snapshot {number}")
-        dialog.setInformativeText("\n".join(details[1:]))
-        dialog.setDetailedText(technical)
-        dialog.setTextInteractionFlags(
-            Qt.TextSelectableByMouse | Qt.TextSelectableByKeyboard
+        show_message_dialog(
+            self,
+            f"Snapshot {number} details",
+            "\n".join(details[1:]),
+            details=technical,
         )
-        dialog.setMinimumWidth(560)
-        dialog.exec()
 
     def restore_snapshot(self, snapshot_id=None, workspace_id=None):
         if self.busy:
@@ -1233,7 +1348,7 @@ class DashboardView(QWidget):
         if snapshot_id is None:
             selected = self.snapshot_table.selectedItems()
             if not selected:
-                QMessageBox.information(self, "Restore snapshot", "Select a snapshot first.")
+                show_message_dialog(self, "Restore snapshot", "Select a snapshot in the list first.")
                 return
             snapshot_id = self.snapshot_table.item(
                 self.snapshot_table.currentRow(), 0
@@ -1241,7 +1356,7 @@ class DashboardView(QWidget):
         if workspace_id is None:
             workspace_id = self.workspace_id
         if snapshot_id is None or workspace_id is None:
-            QMessageBox.information(self, "Restore snapshot", "This snapshot is no longer available.")
+            show_message_dialog(self, "Restore snapshot", "This snapshot is no longer available. Refresh the list and try again.")
             return
         self._task(
             lambda: self.client.get_snapshot(workspace_id, snapshot_id),
@@ -1292,12 +1407,11 @@ class DashboardView(QWidget):
             "",
             "VS Code may close and reopen. Restoring can write saved unsaved-file contents into the mapped project.",
         ]
-        answer = QMessageBox.question(
+        if not confirm_dialog(
             self, "Restore preview",
             "\n".join(preview),
-            QMessageBox.Yes | QMessageBox.Cancel, QMessageBox.Cancel,
-        )
-        if answer != QMessageBox.Yes:
+            confirm_label="Restore snapshot",
+        ):
             return
 
         def operation(progress):
@@ -1339,8 +1453,8 @@ class DashboardView(QWidget):
             return
         rows = sorted({index.row() for index in self.snapshot_table.selectionModel().selectedRows()})
         if len(rows) != 2:
-            QMessageBox.information(
-                self, "Compare snapshots", "Select exactly two snapshots to compare."
+            show_message_dialog(
+                self, "Compare snapshots", "Select exactly two snapshots in the table to compare their saved states."
             )
             return
         entries = []
@@ -1411,15 +1525,12 @@ class DashboardView(QWidget):
                 f"  First: {str(before)[:1200]}",
                 f"  Second: {str(after)[:1200]}",
             ])
-        dialog = QMessageBox(self)
-        dialog.setWindowTitle("Snapshot comparison")
-        dialog.setIcon(QMessageBox.Information)
-        dialog.setText("Snapshot comparison")
-        dialog.setInformativeText("\n".join(lines[:3]))
-        dialog.setDetailedText("\n".join(lines))
-        dialog.setTextInteractionFlags(Qt.TextSelectableByMouse | Qt.TextSelectableByKeyboard)
-        dialog.setMinimumWidth(600)
-        dialog.exec()
+        show_message_dialog(
+            self,
+            "Snapshot comparison",
+            "\n".join(lines[:3]),
+            details="\n".join(lines),
+        )
 
     def _restore_done(self, result):
         if result.get("vscode_ok") is False:
@@ -1439,14 +1550,17 @@ class DashboardView(QWidget):
         )
 
     def logout(self):
-        answer = QMessageBox.question(self, "Sign out", "Sign out of Oryn on this device?", QMessageBox.Yes | QMessageBox.Cancel, QMessageBox.Cancel)
-        if answer != QMessageBox.Yes:
+        if not confirm_dialog(
+            self, "Sign out",
+            "Sign out of Oryn on this device? Your cloud snapshots will remain saved.",
+            confirm_label="Sign out",
+        ):
             return
         try:
             if SESSION_FILE.exists():
                 SESSION_FILE.unlink()
         except OSError as exc:
-            QMessageBox.warning(self, "Sign out", f"Could not remove the local session: {exc}")
+            show_error_dialog(self, f"Could not remove the local session file.\n\nDetails: {exc}")
             return
         self.logged_out.emit()
 

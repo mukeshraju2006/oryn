@@ -9,7 +9,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication, QPushButton
 from urllib.error import HTTPError
 
-from gui.qt_app import AuthView, DashboardView, Task, TaskCancelled, error_message
+from gui.qt_app import AuthView, DashboardView, Task, TaskCancelled, confirm_dialog, error_message, show_message_dialog
 
 
 @pytest.fixture(scope="session")
@@ -95,3 +95,41 @@ def test_long_task_cancellation_is_checked_at_safe_progress_points():
     task.request_cancel()
     with pytest.raises(TaskCancelled, match="cancelled"):
         task.report_progress("checkpoint")
+
+
+
+def test_confirmation_dialog_has_explicit_action_labels(qt_app):
+    from gui.qt_app import confirm_dialog
+    from PySide6.QtCore import QTimer
+
+    from gui.qt_app import QDialog, QPushButton
+
+    def inspect_dialog():
+        dialog = QApplication.activeModalWidget()
+        assert isinstance(dialog, QDialog)
+        labels = {button.text() for button in dialog.findChildren(QPushButton)}
+        assert "Cancel" in labels
+        assert "Delete snapshot" in labels
+        dialog.reject()
+
+    QTimer.singleShot(0, inspect_dialog)
+    assert confirm_dialog(
+        None, "Delete snapshot",
+        "Permanently delete Snapshot 4?",
+        confirm_label="Delete snapshot", destructive=True,
+    ) is False
+
+
+def test_message_dialog_shows_body_and_close_action(qt_app):
+    from PySide6.QtCore import QTimer
+    from gui.qt_app import QDialog, QLabel
+
+    def inspect_dialog():
+        dialog = QApplication.activeModalWidget()
+        assert isinstance(dialog, QDialog)
+        assert any(label.text() == "A readable message" for label in dialog.findChildren(QLabel))
+        assert any(button.text() == "Close" for button in dialog.findChildren(QPushButton))
+        dialog.accept()
+
+    QTimer.singleShot(0, inspect_dialog)
+    show_message_dialog(None, "Test dialog", "A readable message")
