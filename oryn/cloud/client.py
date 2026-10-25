@@ -195,6 +195,7 @@ class CloudClient:
         workspace_id,
         snapshot_id,
     ):
+        from oryn.core.snapshot import migrate_snapshot_data
 
         url = (
             f"{self.base_url}"
@@ -202,9 +203,7 @@ class CloudClient:
             f"/snapshots/{snapshot_id}"
         )
 
-        return self._request(
-            url
-        )
+        return migrate_snapshot_data(self._request(url))
 
     # CHANGED:
     # List authenticated snapshots.
