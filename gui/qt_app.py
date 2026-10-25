@@ -548,6 +548,9 @@ class DashboardView(QWidget):
         table_head = QHBoxLayout()
         table_head.addWidget(make_label("Recent snapshots", "heroTitle"))
         table_head.addStretch(1)
+        self.compare_button = QPushButton("Compare selected")
+        self.compare_button.clicked.connect(self.compare_selected_snapshots)
+        table_head.addWidget(self.compare_button)
         self.snapshot_count_label = make_label("0 records", muted=True)
         table_head.addWidget(self.snapshot_count_label)
         table_col.addLayout(table_head)
@@ -566,7 +569,7 @@ class DashboardView(QWidget):
         self.snapshot_table.verticalHeader().setVisible(False)
         self.snapshot_table.setShowGrid(False)
         self.snapshot_table.setSelectionBehavior(QAbstractItemView.SelectRows)
-        self.snapshot_table.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.snapshot_table.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.snapshot_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.snapshot_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
         for column in range(1, 6):
@@ -651,6 +654,7 @@ class DashboardView(QWidget):
         self.workspace_combo.setEnabled(not busy)
         self.snapshot_search.setEnabled(not busy)
         self.snapshot_table.setEnabled(not busy)
+        self.compare_button.setEnabled(not busy)
         self.logout_button.setEnabled(not busy)
 
     def load_workspaces(self):
@@ -863,6 +867,9 @@ class DashboardView(QWidget):
     def _selection_changed(self):
         selected = self.snapshot_table.selectedItems()
         self.restore_button.setEnabled(bool(selected) and not self.busy)
+        if hasattr(self, "compare_button"):
+            selected_rows = self.snapshot_table.selectionModel().selectedRows()
+            self.compare_button.setEnabled(len(selected_rows) == 2 and not self.busy)
 
     def create_workspace(self):
         if self.busy:
@@ -975,27 +982,134 @@ class DashboardView(QWidget):
         if snapshot_id is None or workspace_id is None:
             QMessageBox.information(self, "Restore snapshot", "This snapshot is no longer available.")
             return
+        self._task(
+            lambda: self.client.get_snapshot(workspace_id, snapshot_id),
+            lambda snapshot: self._restore_preview(snapshot, snapshot_id, workspace_id),
+            "Loading restore preview…",
+        )
 
+    def _restore_preview(self, snapshot, snapshot_id, workspace_id):
+        if not isinstance(snapshot, dict) or not snapshot:
+            show_error_dialog(self, "The selected snapshot could not be found.")
+            return
+        workspace = snapshot.get("workspace") or {}
+        files = snapshot.get("files") or []
+        urls = snapshot.get("browser_urls") or []
+        project = snapshot.get("project") or {}
+        project_files = project.get("files") or [] if isinstance(project, dict) else []
+        preview = [
+            f"Application: {snapshot.get('application') or 'workspace'}",
+            f"Project path: {workspace.get('path') or 'Not recorded'}",
+            f"Editor files: {len(files)}",
+            f"Project files stored for recovery: {len(project_files)}",
+            f"Browser tabs to open: {len(urls)}",
+            f"Active file: {snapshot.get('active_file') or 'Not recorded'}",
+            "",
+            "VS Code may close and reopen. Restoring can write saved unsaved-file contents into the mapped project.",
+        ]
         answer = QMessageBox.question(
-            self, "Restore snapshot",
-            "Restore this saved workspace? VS Code may close and reopen as part of the restore process.",
+            self, "Restore preview",
+            "\n".join(preview),
             QMessageBox.Yes | QMessageBox.Cancel, QMessageBox.Cancel,
         )
         if answer != QMessageBox.Yes:
             return
 
         def operation():
-            snapshot = self.client.get_snapshot(workspace_id, snapshot_id)
-            if not snapshot:
-                raise RuntimeError("The selected snapshot could not be found.")
             app_type = snapshot.get("application")
             if app_type == "vscode":
                 vscode_ok = VSCodeAdapter().restore(snapshot)
                 if not vscode_ok:
-                    raise RuntimeError("VS Code restore did not complete. Review the terminal output for details.")
-            urls = BrowserAdapter().restore_urls(snapshot.get("browser_urls", []))
-            return {"urls": urls, "application": app_type}
+                    raise RuntimeError(
+                        "VS Code restore did not complete. Review the terminal output for details."
+                    )
+            opened_urls = BrowserAdapter().restore_urls(urls)
+            return {
+                "urls": opened_urls,
+                "application": app_type,
+                "files": len(files),
+            }
         self._task(operation, self._restore_done, "Restoring selected snapshot…")
+
+    def compare_selected_snapshots(self):
+        if self.busy:
+            return
+        rows = sorted({index.row() for index in self.snapshot_table.selectionModel().selectedRows()})
+        if len(rows) != 2:
+            QMessageBox.information(
+                self, "Compare snapshots", "Select exactly two snapshots to compare."
+            )
+            return
+        entries = []
+        for row in rows:
+            item = self.snapshot_table.item(row, 0)
+            if item is None:
+                return
+            entries.append({
+                "id": item.data(Qt.UserRole),
+                "label": item.text(),
+                "workspace_id": self.workspace_id,
+            })
+        if any(entry["id"] is None for entry in entries):
+            show_error_dialog(self, "One of the selected snapshots has no valid ID.")
+            return
+
+        def operation():
+            left = self.client.get_snapshot(entries[0]["workspace_id"], entries[0]["id"])
+            right = self.client.get_snapshot(entries[1]["workspace_id"], entries[1]["id"])
+            return left, right
+        self._task(
+            operation,
+            lambda result: self._show_snapshot_comparison(entries, result[0], result[1]),
+            "Comparing selected snapshots…",
+        )
+
+    def _show_snapshot_comparison(self, entries, left, right):
+        def project_path(data):
+            return (data.get("workspace") or {}).get("path") or "Not recorded"
+        def file_paths(data):
+            return sorted(
+                item.get("path", "?")
+                for item in data.get("files", [])
+                if isinstance(item, dict)
+            )
+        def browser_urls(data):
+            return sorted(data.get("browser_urls") or [])
+        comparisons = [
+            ("Application", left.get("application"), right.get("application")),
+            ("Project path", project_path(left), project_path(right)),
+            ("Active file", left.get("active_file"), right.get("active_file")),
+            ("Editor file count", len(left.get("files") or []), len(right.get("files") or [])),
+            ("Browser tab count", len(left.get("browser_urls") or []), len(right.get("browser_urls") or [])),
+            ("Project file list", file_paths(left), file_paths(right)),
+            ("Browser URL set", browser_urls(left), browser_urls(right)),
+        ]
+        changed = [
+            (label, before, after)
+            for label, before, after in comparisons
+            if before != after
+        ]
+        lines = [
+            f"{entries[0]['label']}  vs  {entries[1]['label']}",
+            "",
+            f"{len(changed)} compared field(s) differ.",
+        ]
+        for label, before, after in changed:
+            lines.extend([
+                "",
+                f"{label}:",
+                f"  First: {str(before)[:1200]}",
+                f"  Second: {str(after)[:1200]}",
+            ])
+        dialog = QMessageBox(self)
+        dialog.setWindowTitle("Snapshot comparison")
+        dialog.setIcon(QMessageBox.Information)
+        dialog.setText("Snapshot comparison")
+        dialog.setInformativeText("\n".join(lines[:3]))
+        dialog.setDetailedText("\n".join(lines))
+        dialog.setTextInteractionFlags(Qt.TextSelectableByMouse | Qt.TextSelectableByKeyboard)
+        dialog.setMinimumWidth(600)
+        dialog.exec()
 
     def _restore_done(self, result):
         self._log(f"Restore finished · {result['application']} · {result['urls']} browser tab(s) requested")
