@@ -15,7 +15,7 @@ class CloudClient:
         self.base_url = (
             base_url
             or os.getenv("ORYN_API_URL")
-            or "https://oryn-navy.vercel.app"
+            or "https://oryn-cloud-rebuild.vercel.app"
         ).rstrip("/")
 
         # CHANGED:
