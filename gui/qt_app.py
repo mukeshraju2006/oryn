@@ -100,23 +100,28 @@ def error_message(exc: Exception) -> str:
 class Task(QThread):
     succeeded = Signal(object)
     failed = Signal(str)
+    progress = Signal(str)
 
-    def __init__(self, function):
+    def __init__(self, function, report_progress=False):
         super().__init__()
         self.function = function
+        self.report_progress = report_progress
 
     def run(self):
         try:
-            self.succeeded.emit(self.function())
+            result = self.function(self.progress.emit) if self.report_progress else self.function()
+            self.succeeded.emit(result)
         except Exception as exc:
             self.failed.emit(error_message(exc))
 
 
-def run_task(owner, function, on_success, on_error):
-    task = Task(function)
+def run_task(owner, function, on_success, on_error, on_progress=None):
+    task = Task(function, report_progress=on_progress is not None)
     owner._tasks.add(task)
     task.succeeded.connect(on_success)
     task.failed.connect(on_error)
+    if on_progress is not None:
+        task.progress.connect(on_progress)
     task.finished.connect(lambda task=task: owner._tasks.discard(task))
     task.start()
     return task
@@ -566,7 +571,7 @@ class DashboardView(QWidget):
             self.activity.takeItem(self.activity.count() - 1)
         self.status_label.setText(message)
 
-    def _task(self, function, success, activity):
+    def _task(self, function, success, activity, on_progress=None):
         self._set_busy(True)
         def done(result):
             self._set_busy(False)
@@ -584,7 +589,7 @@ class DashboardView(QWidget):
                 return
             QMessageBox.warning(self, "Oryn", message)
         self._log(activity)
-        run_task(self, function, done, failed)
+        run_task(self, function, done, failed, on_progress=on_progress)
 
     def _set_busy(self, busy):
         self.busy = busy
@@ -714,8 +719,10 @@ class DashboardView(QWidget):
             return
         workspace_id = self.workspace_id
         workspaces_count = len(self.workspaces)
-        def operation():
+        def operation(progress):
+            progress("Inspecting VS Code workspace and editor state…")
             snapshot = VSCodeAdapter().capture()
+            progress("Reading Chrome session data…")
             browser_urls = BrowserAdapter().capture_urls()
             if snapshot is not None:
                 snapshot.browser_urls = browser_urls
@@ -728,11 +735,18 @@ class DashboardView(QWidget):
                 raise RuntimeError("No supported workspace or browser session was found to capture.")
             target_id = workspace_id
             if target_id is None:
+                progress("Creating cloud workspace…")
                 created = self.client.create_workspace(f"Oryn Workspace {workspaces_count + 1}")
                 target_id = created["id"]
+            progress("Compressing snapshot and uploading to Oryn Cloud…")
             result = self.client.create_snapshot(target_id, snapshot)
             return {"result": result, "workspace_id": target_id}
-        self._task(operation, self._capture_done, "Capturing workspace and uploading snapshot…")
+        self._task(
+            operation,
+            self._capture_done,
+            "Starting workspace capture…",
+            on_progress=self._log,
+        )
 
     def _capture_done(self, result):
         snap = result["result"]
