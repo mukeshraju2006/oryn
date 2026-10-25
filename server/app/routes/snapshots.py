@@ -95,12 +95,13 @@ def create_snapshot(
     db.commit()
     db.refresh(snapshot)
 
-    # IDs are global database identifiers; display numbers belong to users.
+    # Display numbers are local to this workspace, not global to the account.
+    # They remain stable as long as snapshots are retained; deletion/retention
+    # will require a persisted per-workspace sequence before it is introduced.
     snapshot_number = db.scalar(
         select(func.count(Snapshot.id))
-        .join(Workspace, Snapshot.workspace_id == Workspace.id)
         .where(
-            Workspace.user_id == current_user.id,
+            Snapshot.workspace_id == workspace_id,
             Snapshot.id <= snapshot.id,
         )
     ) or 1
@@ -133,15 +134,14 @@ def list_snapshots(
         db,
     )
 
-    # Number snapshots across all workspaces owned by this user. The
-    # window function avoids loading every snapshot into application memory.
+    # Number snapshots independently inside the selected workspace. Keep the
+    # numbering in SQL so large histories are not materialized in Python.
     numbered_ids = (
         select(
             Snapshot.id.label("snapshot_id"),
             func.row_number().over(order_by=Snapshot.id).label("snapshot_number"),
         )
-        .join(Workspace, Snapshot.workspace_id == Workspace.id)
-        .where(Workspace.user_id == current_user.id)
+        .where(Snapshot.workspace_id == workspace_id)
         .subquery()
     )
 

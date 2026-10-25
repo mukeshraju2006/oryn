@@ -93,8 +93,30 @@ def error_message(exc: Exception) -> str:
             pass
         return f"API request failed (HTTP {exc.code})."
     if isinstance(exc, URLError):
+        reason = getattr(exc, "reason", None)
+        if isinstance(reason, str) and reason:
+            return f"Could not reach Oryn Cloud: {reason}"
         return "Could not reach Oryn Cloud. Check your connection and API URL."
     return str(exc) or exc.__class__.__name__
+
+
+def show_error_dialog(parent, message: str):
+    """Show long errors in a readable, selectable dialog with copy support."""
+    dialog = QMessageBox(parent)
+    dialog.setIcon(QMessageBox.Warning)
+    dialog.setWindowTitle("Oryn")
+    dialog.setText("Oryn couldn't complete the operation.")
+    dialog.setInformativeText(message)
+    dialog.setDetailedText(message)
+    dialog.setTextInteractionFlags(
+        Qt.TextSelectableByMouse | Qt.TextSelectableByKeyboard
+    )
+    dialog.setMinimumWidth(560)
+    copy_button = dialog.addButton("Copy error", QMessageBox.ActionRole)
+    dialog.addButton(QMessageBox.Close)
+    dialog.exec()
+    if dialog.clickedButton() is copy_button:
+        QApplication.clipboard().setText(message)
 
 
 class Task(QThread):
@@ -522,17 +544,20 @@ class DashboardView(QWidget):
         table_head.addWidget(self.snapshot_count_label)
         table_col.addLayout(table_head)
         table_col.addWidget(make_label("Select a snapshot to restore that saved state.", muted=True))
-        self.snapshot_table = QTableWidget(0, 4)
-        self.snapshot_table.setHorizontalHeaderLabels(["SNAPSHOT", "APPLICATION", "CAPTURED", "FORMAT"])
+        self.snapshot_table = QTableWidget(0, 6)
+        self.snapshot_table.setHorizontalHeaderLabels(
+            ["SNAPSHOT", "APPLICATION", "CAPTURED", "FORMAT", "DETAILS", "ACTION"]
+        )
         self.snapshot_table.verticalHeader().setVisible(False)
         self.snapshot_table.setShowGrid(False)
         self.snapshot_table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.snapshot_table.setSelectionMode(QAbstractItemView.SingleSelection)
         self.snapshot_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.snapshot_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
-        self.snapshot_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
-        self.snapshot_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
-        self.snapshot_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeToContents)
+        for column in range(1, 6):
+            self.snapshot_table.horizontalHeader().setSectionResizeMode(
+                column, QHeaderView.ResizeToContents
+            )
         self.snapshot_table.setMinimumHeight(190)
         self.snapshot_table.itemSelectionChanged.connect(self._selection_changed)
         table_col.addWidget(self.snapshot_table)
@@ -544,8 +569,12 @@ class DashboardView(QWidget):
         main_col.addWidget(scroll, 1)
         root.addWidget(main, 1)
 
-        self.nav_workspaces.clicked.connect(self.workspace_combo.setFocus)
-        self.nav_snapshots.clicked.connect(self.snapshot_table.setFocus)
+        # Until dedicated page views are introduced, navigation should move
+        # to the relevant real section rather than merely focus an arbitrary widget.
+        self.nav_workspaces.clicked.connect(lambda: self.workspace_combo.setFocus())
+        self.nav_snapshots.clicked.connect(
+            lambda: self.snapshot_table.scrollToTop() or self.snapshot_table.setFocus()
+        )
         self.nav_overview.clicked.connect(lambda: self.status_label.setText("Overview"))
 
     def _metric(self, layout, col, title, value, note, icon):
@@ -590,7 +619,7 @@ class DashboardView(QWidget):
                     pass
                 self.session_expired.emit("Your saved session is no longer valid. Sign in again.")
                 return
-            QMessageBox.warning(self, "Oryn", message)
+            show_error_dialog(self, message)
         self._log(activity)
         run_task(self, function, done, failed, on_progress=on_progress)
 
@@ -603,6 +632,7 @@ class DashboardView(QWidget):
         self.refresh_button.setEnabled(not busy)
         self.new_workspace_button.setEnabled(not busy)
         self.workspace_combo.setEnabled(not busy)
+        self.snapshot_table.setEnabled(not busy)
         self.logout_button.setEnabled(not busy)
 
     def load_workspaces(self):
@@ -670,6 +700,23 @@ class DashboardView(QWidget):
                 if col == 0:
                     item.setData(Qt.UserRole, snapshot.get("id"))
                 self.snapshot_table.setItem(row, col, item)
+
+            snapshot_id = snapshot.get("id")
+            workspace_id = self.workspace_id
+            details_button = QPushButton("Details")
+            details_button.clicked.connect(
+                lambda checked=False, sid=snapshot_id, wid=workspace_id, num=number:
+                    self.show_snapshot_details(sid, wid, num)
+            )
+            restore_button = QPushButton("Restore")
+            restore_button.setObjectName("primary")
+            restore_button.clicked.connect(
+                lambda checked=False, sid=snapshot_id, wid=workspace_id:
+                    self.restore_snapshot(snapshot_id=sid, workspace_id=wid)
+            )
+            self.snapshot_table.setCellWidget(row, 4, details_button)
+            self.snapshot_table.setCellWidget(row, 5, restore_button)
+            self.snapshot_table.setRowHeight(row, 48)
         self.snapshot_count_label.setText(f"{len(self.snapshots)} record(s)")
         if self.snapshot_table.rowCount():
             self.snapshot_table.selectRow(0)
@@ -757,15 +804,62 @@ class DashboardView(QWidget):
         self._log(f"Snapshot {snap.get('snapshot_number', snap.get('id', '?'))} saved to Oryn Cloud")
         self.load_workspaces()
 
-    def restore_snapshot(self):
+    def show_snapshot_details(self, snapshot_id, workspace_id, number):
+        if self.busy or snapshot_id is None or workspace_id is None:
+            return
+        self._task(
+            lambda: self.client.get_snapshot(workspace_id, snapshot_id),
+            lambda data: self._snapshot_details_loaded(data, number),
+            f"Loading snapshot {number} details…",
+        )
+
+    def _snapshot_details_loaded(self, snapshot, number):
+        workspace = snapshot.get("workspace") or {}
+        files = snapshot.get("files") or []
+        urls = snapshot.get("browser_urls") or []
+        project = snapshot.get("project") or {}
+        details = [
+            f"Snapshot: {number}",
+            f"Application: {snapshot.get('application') or 'workspace'}",
+            f"Version: {snapshot.get('version', '—')}",
+            f"Project path: {workspace.get('path') or 'Not recorded'}",
+            f"Active file: {snapshot.get('active_file') or 'Not recorded'}",
+            f"Captured files: {len(files)}",
+            f"Browser URLs: {len(urls)}",
+            f"Project payload entries: {len(project.get('files') or []) if isinstance(project, dict) else 'Not available'}",
+        ]
+        technical = "\n".join(details)
+        if urls:
+            technical += "\n\nBrowser URLs:\n" + "\n".join(str(url) for url in urls)
+        dialog = QMessageBox(self)
+        dialog.setWindowTitle(f"Snapshot {number} details")
+        dialog.setIcon(QMessageBox.Information)
+        dialog.setText(f"Snapshot {number}")
+        dialog.setInformativeText("\n".join(details[1:]))
+        dialog.setDetailedText(technical)
+        dialog.setTextInteractionFlags(
+            Qt.TextSelectableByMouse | Qt.TextSelectableByKeyboard
+        )
+        dialog.setMinimumWidth(560)
+        dialog.exec()
+
+    def restore_snapshot(self, snapshot_id=None, workspace_id=None):
         if self.busy:
             return
-        selected = self.snapshot_table.selectedItems()
-        if not selected:
-            QMessageBox.information(self, "Restore snapshot", "Select a snapshot first.")
+        if snapshot_id is None:
+            selected = self.snapshot_table.selectedItems()
+            if not selected:
+                QMessageBox.information(self, "Restore snapshot", "Select a snapshot first.")
+                return
+            snapshot_id = self.snapshot_table.item(
+                self.snapshot_table.currentRow(), 0
+            ).data(Qt.UserRole)
+        if workspace_id is None:
+            workspace_id = self.workspace_id
+        if snapshot_id is None or workspace_id is None:
+            QMessageBox.information(self, "Restore snapshot", "This snapshot is no longer available.")
             return
-        snapshot_id = self.snapshot_table.item(self.snapshot_table.currentRow(), 0).data(Qt.UserRole)
-        workspace_id = self.workspace_id
+
         answer = QMessageBox.question(
             self, "Restore snapshot",
             "Restore this saved workspace? VS Code may close and reopen as part of the restore process.",
@@ -779,7 +873,6 @@ class DashboardView(QWidget):
             if not snapshot:
                 raise RuntimeError("The selected snapshot could not be found.")
             app_type = snapshot.get("application")
-            vscode_ok = True
             if app_type == "vscode":
                 vscode_ok = VSCodeAdapter().restore(snapshot)
                 if not vscode_ok:

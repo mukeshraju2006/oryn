@@ -1,4 +1,4 @@
-"""Regression tests for per-user snapshot numbering."""
+"""Regression tests for workspace-scoped snapshot numbering."""
 
 import os
 
@@ -44,20 +44,24 @@ def test_snapshot_numbers_are_independent_per_user_and_span_workspaces():
         other_users_first = create_snapshot(
             two_workspace_a.id, {"version": 5}, db, user_two
         )
-        second = create_snapshot(
+        other_workspace_first = create_snapshot(
             one_workspace_b.id, {"version": 5}, db, user_one
+        )
+        second = create_snapshot(
+            one_workspace_a.id, {"version": 5}, db, user_one
         )
 
         assert first["snapshot_number"] == 1
         assert other_users_first["snapshot_number"] == 1
+        assert other_workspace_first["snapshot_number"] == 1
         assert second["snapshot_number"] == 2
 
         user_one_a = list_snapshots(one_workspace_a.id, db, user_one)
         user_one_b = list_snapshots(one_workspace_b.id, db, user_one)
         user_two_a = list_snapshots(two_workspace_a.id, db, user_two)
 
-        assert [item["snapshot_number"] for item in user_one_a] == [1]
-        assert [item["snapshot_number"] for item in user_one_b] == [2]
+        assert [item["snapshot_number"] for item in user_one_a] == [2, 1]
+        assert [item["snapshot_number"] for item in user_one_b] == [1]
         assert [item["snapshot_number"] for item in user_two_a] == [1]
 
         # The internal database ID remains unique even when display numbers match.
