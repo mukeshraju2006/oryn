@@ -401,7 +401,7 @@ source .venv/bin/activate
 Install dependencies:
 
 ```bash
-pip install -r requirements.txt
+pip install -r requirements-desktop.txt
 ```
 
 Run Oryn:
@@ -429,7 +429,7 @@ Activate it:
 Install dependencies:
 
 ```powershell
-pip install -r requirements.txt
+pip install -r requirements-desktop.txt
 ```
 
 Run Oryn:
