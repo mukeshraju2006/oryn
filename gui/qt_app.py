@@ -1270,8 +1270,11 @@ class DashboardView(QWidget):
             else "will be recreated if project data is available" if destination
             else "not available"
         )
+        vscode_command = VSCodeAdapter().platform.code_executable()
         preview = [
             f"Application: {snapshot.get('application') or 'workspace'}",
+            f"Snapshot format: v{snapshot.get('version', 'unknown')}",
+            f"VS Code command: {'available' if vscode_command else 'not found on PATH'}",
             f"Original project path: {source_path or 'Not recorded'}",
             f"Restore destination: {destination_text} ({destination_state})",
             f"Editor files: {len(files)}",

@@ -36,12 +36,11 @@ def create_workspace(
 ):
 
     name = data.get("name")
-
-    if not name:
-        raise HTTPException(
-            status_code=400,
-            detail="name is required",
-        )
+    if not isinstance(name, str) or not name.strip():
+        raise HTTPException(status_code=422, detail="Workspace name cannot be empty.")
+    if len(name.strip()) > 255:
+        raise HTTPException(status_code=422, detail="Workspace name must be 255 characters or fewer.")
+    name = name.strip()
 
     workspace = Workspace(
         # CHANGED:
