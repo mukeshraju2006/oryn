@@ -8,4 +8,4 @@ python-dotenv
 chromium-session
 pyautogui
 pyperclip
-PySide6
+PySide6-Essentials
