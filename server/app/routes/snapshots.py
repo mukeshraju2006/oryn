@@ -84,6 +84,18 @@ def create_snapshot(
             status_code=422,
             detail=f"Snapshot version {version} is not supported by this API (maximum {MAX_SNAPSHOT_VERSION}).",
         )
+    for field, expected_type, description in (
+        ("workspace", dict, "an object"),
+        ("files", list, "a list"),
+        ("browser_urls", list, "a list"),
+    ):
+        if field in data and not isinstance(data[field], expected_type):
+            raise HTTPException(
+                status_code=422,
+                detail=f"Snapshot field '{field}' must be {description}.",
+            )
+    if "application" in data and not isinstance(data["application"], str):
+        raise HTTPException(status_code=422, detail="Snapshot application must be a string.")
 
     # Limit persisted snapshot size to protect the database from accidental
     # huge payloads and unbounded client uploads.

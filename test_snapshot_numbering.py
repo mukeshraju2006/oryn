@@ -93,3 +93,23 @@ def test_future_snapshot_format_is_rejected():
         assert error.value.status_code == 422
     Base.metadata.drop_all(engine)
     engine.dispose()
+
+
+
+def test_invalid_snapshot_structure_is_rejected():
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    with Session(engine) as db:
+        user = User(email="shape@example.test", password_hash="unused")
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+        workspace = Workspace(user_id=user.id, name="Shape")
+        db.add(workspace)
+        db.commit()
+        db.refresh(workspace)
+        with pytest.raises(HTTPException) as error:
+            create_snapshot(workspace.id, {"version": 5, "workspace": []}, db, user)
+        assert error.value.status_code == 422
+    Base.metadata.drop_all(engine)
+    engine.dispose()
