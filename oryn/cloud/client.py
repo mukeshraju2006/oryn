@@ -1,3 +1,4 @@
+import gzip
 import json
 import os
 import urllib.request
@@ -18,8 +19,14 @@ class CloudClient:
             or "https://oryn-cloud-rebuild.vercel.app"
         ).rstrip("/")
 
-        # CHANGED:
-        # Store authentication token.
+        # Bound network waits so a stalled connection cannot leave the GUI
+        # in a permanent loading state. Override for slower links with
+        # ORYN_REQUEST_TIMEOUT (seconds).
+        try:
+            self.timeout = max(5.0, float(os.getenv("ORYN_REQUEST_TIMEOUT", "30")))
+        except ValueError:
+            self.timeout = 30.0
+
         self.token = token
 
     # CHANGED:
@@ -51,7 +58,7 @@ class CloudClient:
         )
 
         with urllib.request.urlopen(
-            request
+            request, timeout=self.timeout
         ) as response:
 
             return json.loads(
@@ -113,15 +120,16 @@ class CloudClient:
         url,
         data=None,
         method="GET",
+        content_encoding=None,
     ):
 
         headers = {}
 
         if data is not None:
+            headers["Content-Type"] = "application/json"
 
-            headers[
-                "Content-Type"
-            ] = "application/json"
+        if content_encoding:
+            headers["Content-Encoding"] = content_encoding
 
         if self.token:
 
@@ -154,9 +162,18 @@ class CloudClient:
         snapshot,
     ):
 
-        data = json.dumps(
-            snapshot.to_dict()
+        # Compact JSON avoids whitespace overhead. Gzip level 1 is fast and
+        # substantially reduces text-heavy project snapshots over slow links.
+        raw_data = json.dumps(
+            snapshot.to_dict(),
+            separators=(",", ":"),
+            ensure_ascii=False,
         ).encode("utf-8")
+        content_encoding = None
+        data = raw_data
+        if len(raw_data) >= 1024:
+            data = gzip.compress(raw_data, compresslevel=1, mtime=0)
+            content_encoding = "gzip"
 
         url = (
             f"{self.base_url}"
@@ -168,6 +185,7 @@ class CloudClient:
             url,
             data=data,
             method="POST",
+            content_encoding=content_encoding,
         )
 
     # CHANGED:
