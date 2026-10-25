@@ -5,7 +5,8 @@ import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
-from PySide6.QtWidgets import QApplication
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QApplication, QPushButton
 from urllib.error import HTTPError
 
 from gui.qt_app import AuthView, DashboardView, error_message
@@ -70,10 +71,10 @@ def test_dashboard_snapshot_rows_have_restore_details_and_delete(qt_app, monkeyp
     assert view.snapshot_table.rowCount() == 1
     actions = view.snapshot_table.cellWidget(0, 6)
     assert actions is not None
-    assert {button.text() for button in actions.findChildren(__import__(
-        "PySide6.QtWidgets", fromlist=["QPushButton"]
-    ).QPushButton)} >= {"Restore", "Details", "Delete"}
-    assert view.snapshot_table.item(0, 0).data(0x0100) == 101
+    assert {button.text() for button in actions.findChildren(QPushButton)} >= {
+        "Restore", "Details", "Delete"
+    }
+    assert view.snapshot_table.item(0, 0).data(Qt.UserRole) == 101
     view.close()
 
 
