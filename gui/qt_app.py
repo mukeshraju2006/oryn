@@ -356,6 +356,7 @@ class SnapshotChart(QWidget):
 
 class DashboardView(QWidget):
     logged_out = Signal()
+    session_expired = Signal(str)
 
     def __init__(self, client):
         super().__init__()
@@ -534,9 +535,9 @@ class DashboardView(QWidget):
         main_col.addWidget(scroll, 1)
         root.addWidget(main, 1)
 
-        self.nav_workspaces.clicked.connect(self.create_workspace)
-        self.nav_snapshots.clicked.connect(lambda: self.snapshot_table.setFocus())
-        self.nav_overview.clicked.connect(lambda: None)
+        self.nav_workspaces.clicked.connect(self.workspace_combo.setFocus)
+        self.nav_snapshots.clicked.connect(self.snapshot_table.setFocus)
+        self.nav_overview.clicked.connect(lambda: self.status_label.setText("Overview"))
 
     def _metric(self, layout, col, title, value, note, icon):
         card = QFrame()
@@ -572,6 +573,14 @@ class DashboardView(QWidget):
         def failed(message):
             self._set_busy(False)
             self._log(message)
+            if message.startswith("API error 401:"):
+                try:
+                    if SESSION_FILE.exists():
+                        SESSION_FILE.unlink()
+                except OSError:
+                    pass
+                self.session_expired.emit("Your saved session is no longer valid. Sign in again.")
+                return
             QMessageBox.warning(self, "Oryn", message)
         self._log(activity)
         run_task(self, function, done, failed)
@@ -797,15 +806,18 @@ class MainWindow(QMainWindow):
     def show_dashboard(self, client):
         self.dashboard = DashboardView(client)
         self.dashboard.logged_out.connect(self.show_auth)
+        self.dashboard.session_expired.connect(self.show_auth)
         self.stack.addWidget(self.dashboard)
         self.stack.setCurrentWidget(self.dashboard)
 
-    def show_auth(self):
+    def show_auth(self, reason=""):
         if self.dashboard:
             self.stack.removeWidget(self.dashboard)
             self.dashboard.deleteLater()
             self.dashboard = None
         self.stack.setCurrentWidget(self.auth_view)
+        if reason:
+            self.auth_view.message.setText(reason)
 
 
 def main():
