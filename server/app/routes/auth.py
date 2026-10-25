@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 
 import jwt
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi.security import OAuth2PasswordBearer
+from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from pwdlib import PasswordHash
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import select
@@ -22,7 +22,7 @@ INSECURE_SECRET_VALUES = {
     "oryn-development-secret-change-this",
     "replace-with-a-random-secret-at-least-32-characters",
 }
-EMAIL_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+EMAIL_PATTERN = re.compile(r"^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$")
 
 
 class Credentials(BaseModel):
@@ -71,9 +71,19 @@ def _create_access_token(user: User) -> str:
     )
 
 
+def _authenticate_user(email: str, password: str, db: Session) -> User:
+    normalized_email = email.strip().lower()
+    user = db.scalar(select(User).where(User.email == normalized_email))
+    if user is None or not password_hash.verify(password, user.password_hash):
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+    return user
+
+
 router = APIRouter(prefix="/auth", tags=["auth"])
+# Swagger's OAuth2 password flow must target a form-encoded endpoint, not
+# the JSON-based /auth/login endpoint used by the desktop client.
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/token")
 password_hash = PasswordHash.recommended()
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
 
 
 @router.post("/register")
@@ -111,10 +121,25 @@ def register(data: RegistrationCredentials, db: Session = Depends(get_db)):
 
 @router.post("/login")
 def login(data: Credentials, db: Session = Depends(get_db)):
-    user = db.scalar(select(User).where(User.email == data.email))
-    if user is None or not password_hash.verify(data.password, user.password_hash):
-        raise HTTPException(status_code=401, detail="Invalid email or password")
+    """JSON login retained for the Oryn desktop client."""
+    user = _authenticate_user(data.email, data.password, db)
+    return {
+        "access_token": _create_access_token(user),
+        "token_type": "bearer",
+    }
 
+
+@router.post("/token")
+def login_for_swagger(
+    form_data: OAuth2PasswordRequestForm = Depends(),
+    db: Session = Depends(get_db),
+):
+    """OAuth2 form login used by Swagger's Authorize dialog.
+
+    OAuth2 names the account field 'username'; Oryn accounts use email
+    addresses, so the submitted username is treated as the account email.
+    """
+    user = _authenticate_user(form_data.username, form_data.password, db)
     return {
         "access_token": _create_access_token(user),
         "token_type": "bearer",
