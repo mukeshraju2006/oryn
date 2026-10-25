@@ -1,3 +1,7 @@
+import hashlib
+import hmac
+import json
+
 CURRENT_SNAPSHOT_VERSION = 5
 
 
@@ -28,11 +32,11 @@ def migrate_snapshot_data(data):
             raise ValueError("Snapshot integrity digest is invalid.")
         unsigned = dict(migrated)
         unsigned.pop("_integrity", None)
-        canonical = __import__("json").dumps(
+        canonical = json.dumps(
             unsigned, separators=(",", ":"), ensure_ascii=False
         ).encode("utf-8")
-        actual_digest = __import__("hashlib").sha256(canonical).hexdigest()
-        if not __import__("hmac").compare_digest(expected_digest, actual_digest):
+        actual_digest = hashlib.sha256(canonical).hexdigest()
+        if not hmac.compare_digest(expected_digest, actual_digest):
             raise ValueError(
                 "Snapshot integrity check failed. The saved data may be corrupted."
             )
