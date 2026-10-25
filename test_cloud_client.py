@@ -1,6 +1,9 @@
 """Cloud client retry and timing regression tests."""
 
+import json
 from urllib.error import URLError
+
+from oryn.core.snapshot import migrate_snapshot_data
 
 import pytest
 
@@ -53,3 +56,32 @@ def test_mutating_request_is_not_retried(monkeypatch):
     with pytest.raises(URLError):
         client.create_workspace("Example")
     assert len(calls) == 1
+
+
+
+def test_snapshot_upload_adds_a_valid_integrity_checksum(monkeypatch):
+    client = CloudClient(base_url="https://example.invalid")
+    captured = {}
+
+    def fake_request(url, data=None, method="GET", content_encoding=None):
+        captured["payload"] = json.loads(data.decode("utf-8"))
+        captured["method"] = method
+        captured["encoding"] = content_encoding
+        return {"id": 4}
+
+    monkeypatch.setattr(client, "_request", fake_request)
+
+    class SnapshotStub:
+        def to_dict(self):
+            return {
+                "version": 5,
+                "application": "vscode",
+                "workspace": {"path": "/tmp/project"},
+                "files": [],
+                "browser_urls": [],
+            }
+
+    assert client.create_snapshot(3, SnapshotStub()) == {"id": 4}
+    assert captured["method"] == "POST"
+    assert captured["payload"]["_integrity"]["algorithm"] == "sha256"
+    assert migrate_snapshot_data(captured["payload"])["application"] == "vscode"
