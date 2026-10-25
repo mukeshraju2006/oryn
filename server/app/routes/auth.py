@@ -22,7 +22,7 @@ INSECURE_SECRET_VALUES = {
     "oryn-development-secret-change-this",
     "replace-with-a-random-secret-at-least-32-characters",
 }
-EMAIL_PATTERN = re.compile(r"^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$")
+EMAIL_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 
 class Credentials(BaseModel):
@@ -82,8 +82,8 @@ def _authenticate_user(email: str, password: str, db: Session) -> User:
 router = APIRouter(prefix="/auth", tags=["auth"])
 # Swagger's OAuth2 password flow must target a form-encoded endpoint, not
 # the JSON-based /auth/login endpoint used by the desktop client.
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/token")
 password_hash = PasswordHash.recommended()
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/token")
 
 
 @router.post("/register")
