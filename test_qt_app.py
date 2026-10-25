@@ -9,7 +9,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication, QPushButton
 from urllib.error import HTTPError
 
-from gui.qt_app import AuthView, DashboardView, error_message
+from gui.qt_app import AuthView, DashboardView, Task, TaskCancelled, error_message
 
 
 @pytest.fixture(scope="session")
@@ -82,3 +82,11 @@ def test_url_error_includes_readable_reason():
     from urllib.error import URLError
 
     assert "Temporary failure" in error_message(URLError("Temporary failure"))
+
+
+
+def test_long_task_cancellation_is_checked_at_safe_progress_points():
+    task = Task(lambda progress: progress("checkpoint"), report_progress=True)
+    task.request_cancel()
+    with pytest.raises(TaskCancelled, match="cancelled"):
+        task.report_progress("checkpoint")
