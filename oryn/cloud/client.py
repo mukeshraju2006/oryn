@@ -1,4 +1,6 @@
 import gzip
+import hashlib
+import hmac
 import json
 import os
 import time
@@ -186,8 +188,16 @@ class CloudClient:
 
         # Compact JSON avoids whitespace overhead. Gzip level 1 is fast and
         # substantially reduces text-heavy project snapshots over slow links.
+        payload = snapshot.to_dict()
+        canonical = json.dumps(
+            payload, separators=(",", ":"), ensure_ascii=False
+        ).encode("utf-8")
+        payload["_integrity"] = {
+            "algorithm": "sha256",
+            "digest": hashlib.sha256(canonical).hexdigest(),
+        }
         raw_data = json.dumps(
-            snapshot.to_dict(),
+            payload,
             separators=(",", ":"),
             ensure_ascii=False,
         ).encode("utf-8")

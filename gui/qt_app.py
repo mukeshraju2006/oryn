@@ -399,6 +399,14 @@ class DashboardView(QWidget):
         self.workspace_id = None
         self.busy = False
         self._build()
+        auth_metrics = getattr(self.client, "last_request_metrics", None)
+        if auth_metrics:
+            server = auth_metrics.get("server_seconds")
+            server_text = f", API {server:.2f}s" if server is not None else ""
+            self._log(
+                f"Sign-in request completed in {auth_metrics.get('seconds', 0):.2f}s"
+                f"{server_text}"
+            )
         self.load_workspaces()
 
     def _build(self):
@@ -719,6 +727,8 @@ class DashboardView(QWidget):
 
     def _task(self, function, success, activity, on_progress=None):
         self._set_busy(True)
+        if hasattr(self.client, "last_request_metrics"):
+            self.client.last_request_metrics = None
         def done(result):
             self._set_busy(False)
             metrics = getattr(self.client, "last_request_metrics", None)

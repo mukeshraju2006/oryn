@@ -19,6 +19,23 @@ def migrate_snapshot_data(data):
             f"(maximum {CURRENT_SNAPSHOT_VERSION}). Update Oryn before restoring it."
         )
     migrated = dict(data)
+    integrity = migrated.get("_integrity")
+    if integrity is not None:
+        if not isinstance(integrity, dict) or integrity.get("algorithm") != "sha256":
+            raise ValueError("Snapshot integrity metadata is invalid.")
+        expected_digest = integrity.get("digest")
+        if not isinstance(expected_digest, str) or len(expected_digest) != 64:
+            raise ValueError("Snapshot integrity digest is invalid.")
+        unsigned = dict(migrated)
+        unsigned.pop("_integrity", None)
+        canonical = __import__("json").dumps(
+            unsigned, separators=(",", ":"), ensure_ascii=False
+        ).encode("utf-8")
+        actual_digest = __import__("hashlib").sha256(canonical).hexdigest()
+        if not __import__("hmac").compare_digest(expected_digest, actual_digest):
+            raise ValueError(
+                "Snapshot integrity check failed. The saved data may be corrupted."
+            )
     if "browser_urls" not in migrated:
         migrated["browser_urls"] = []
     if not isinstance(migrated["browser_urls"], list):
