@@ -27,13 +27,21 @@ Oryn can capture a snapshot of your current workspace and store it in Oryn Cloud
 
 A snapshot can contain:
 
-- Workspace information
-- Project files
-- VS Code state
-- Active file information
-- Editor state
-- Unsaved editor content
+- Workspace information and project path
+- Project files and VS Code editor state
+- Active file information and unsaved editor content
 - Browser URLs
+- A SHA-256 integrity checksum for newly captured snapshots
+
+Snapshot numbers are local to the selected workspace. The database ID remains the internal stable identifier; displayed numbers compact when snapshots are deleted or retention is applied.
+
+The Qt dashboard provides dedicated Overview, Workspaces, and Snapshots pages. Snapshot history supports search, per-row restore/details/delete actions, comparison of two snapshots, and an explicit retention action. Retention permanently deletes snapshots older than the selected newest-N limit and always requires confirmation.
+
+Restoration shows a preview of the saved application, project path, destination, file counts, and browser tabs before proceeding. If VS Code restoration fails, Oryn still attempts browser restoration and reports the partial result.
+
+Long capture operations expose safe cancellation checkpoints. Capture logs report editor scan, browser capture, upload, file/tab counts, and elapsed time. Slow cloud requests include client and server processing timings where available.
+
+Older snapshot formats receive only known additive in-memory migrations. Unsupported future formats and checksum mismatches are rejected rather than silently restored.
 
 ### VS Code
 
@@ -255,11 +263,9 @@ For the current MVP, VS Code and Google Chrome are supported.
 
 ## 3. Capture
 
-Use the **Capture** action in Oryn.
+Use **Capture workspace** in Oryn. The capture process reports its current stage, can be cancelled at safe checkpoints, and records timings for editor inspection, browser capture, and upload.
 
-Oryn collects the supported workspace information and creates a snapshot.
-
-The snapshot is then uploaded to Oryn Cloud.
+Oryn collects the supported workspace information and uploads a snapshot to Oryn Cloud. Project files containing common credentials, private keys, dependency directories, and caches are excluded by the capture adapter.
 
 ## 4. Switch Devices
 
@@ -267,9 +273,11 @@ Install Oryn on another supported machine and log into the same account.
 
 ## 5. Restore
 
-Select the snapshot and restore it.
+Open **Snapshots** and use the row's **Restore** action. Oryn shows a preview before restoring. **Details** inspects the saved snapshot, **Compare selected** compares two selected snapshots, and **Delete** permanently removes a snapshot after confirmation.
 
-Oryn reconstructs the supported workspace state on the new device.
+The **Retention…** action can keep the newest N snapshots in the selected workspace and permanently delete older ones. Check the selected workspace and retention count carefully before confirming.
+
+Oryn reconstructs the supported workspace state on the new device. A failed VS Code restore does not prevent Oryn from attempting to reopen saved browser URLs.
 
 ---
 
