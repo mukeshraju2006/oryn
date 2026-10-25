@@ -75,6 +75,11 @@ def test_dashboard_snapshot_rows_have_restore_details_and_delete(qt_app, monkeyp
         "Restore", "Details", "Delete"
     }
     assert view.snapshot_table.item(0, 0).data(Qt.UserRole) == 101
+    view._filter_snapshots("/tmp/demo")
+    assert not view.snapshot_table.isRowHidden(0)
+    view._filter_snapshots("does-not-exist")
+    assert view.snapshot_table.isRowHidden(0)
+    assert view.snapshot_empty_label.isVisible()
     view.close()
 
 

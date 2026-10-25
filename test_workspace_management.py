@@ -14,7 +14,7 @@ from server.app.models.snapshot import Snapshot
 from server.app.models.user import User
 from server.app.models.workspace import Workspace
 from server.app.routes.snapshots import delete_snapshot, prune_snapshots
-from server.app.routes.workspaces import rename_workspace, delete_workspace
+from server.app.routes.workspaces import create_workspace, rename_workspace, delete_workspace
 
 
 @pytest.fixture
@@ -104,4 +104,14 @@ def test_retention_rejects_invalid_limits(db_and_user):
     db, user, _, workspace = db_and_user
     with pytest.raises(HTTPException) as error:
         prune_snapshots(workspace.id, {"keep_last": True}, db, user)
+    assert error.value.status_code == 422
+
+
+
+def test_create_workspace_trims_name_and_rejects_blank(db_and_user):
+    db, user, _, _ = db_and_user
+    created = create_workspace({"name": "  Work  "}, db, user)
+    assert created["name"] == "Work"
+    with pytest.raises(HTTPException) as error:
+        create_workspace({"name": "   "}, db, user)
     assert error.value.status_code == 422
