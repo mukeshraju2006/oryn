@@ -552,6 +552,9 @@ class DashboardView(QWidget):
         self.compare_button = QPushButton("Compare selected")
         self.compare_button.clicked.connect(self.compare_selected_snapshots)
         table_head.addWidget(self.compare_button)
+        self.retention_button = QPushButton("Retention…")
+        self.retention_button.clicked.connect(self.configure_retention)
+        table_head.addWidget(self.retention_button)
         self.snapshot_count_label = make_label("0 records", muted=True)
         table_head.addWidget(self.snapshot_count_label)
         table_col.addLayout(table_head)
@@ -742,6 +745,7 @@ class DashboardView(QWidget):
         self.snapshot_table.setEnabled(not busy)
         self.workspace_table.setEnabled(not busy)
         self.compare_button.setEnabled(not busy)
+        self.retention_button.setEnabled(not busy and self.workspace_id is not None)
         self.logout_button.setEnabled(not busy)
 
     def load_workspaces(self):
@@ -924,6 +928,36 @@ class DashboardView(QWidget):
         self.workspace_id = None
         self._log(f"Workspace deleted: {name}")
         self.load_workspaces()
+
+    def configure_retention(self):
+        if self.busy or self.workspace_id is None:
+            return
+        keep_last, accepted = QInputDialog.getInt(
+            self, "Snapshot retention",
+            "Keep the newest how many snapshots in this workspace?",
+            20, 1, 5000, 1,
+        )
+        if not accepted:
+            return
+        answer = QMessageBox.warning(
+            self, "Prune snapshot history",
+            f"Keep the newest {keep_last} snapshot(s) and permanently delete all older snapshots in this workspace?",
+            QMessageBox.Yes | QMessageBox.Cancel, QMessageBox.Cancel,
+        )
+        if answer != QMessageBox.Yes:
+            return
+        workspace_id = self.workspace_id
+        self._task(
+            lambda: self.client.prune_snapshots(workspace_id, keep_last),
+            self._retention_done,
+            "Applying snapshot retention…",
+        )
+
+    def _retention_done(self, result):
+        removed = result.get("deleted_count", 0)
+        kept = result.get("kept_count", 0)
+        self._log(f"Retention applied · deleted {removed} old snapshot(s) · kept {kept}")
+        self.load_snapshots()
 
     def delete_snapshot(self, snapshot_id, workspace_id, number):
         if self.busy or snapshot_id is None or workspace_id is None:

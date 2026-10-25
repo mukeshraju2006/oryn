@@ -224,3 +224,34 @@ def delete_snapshot(
     db.delete(snapshot)
     db.commit()
     return {"deleted": True, "snapshot_id": snapshot_id}
+
+
+
+@router.post("/{workspace_id}/snapshots/retention")
+def prune_snapshots(
+    workspace_id: int,
+    data: dict,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    get_user_workspace(workspace_id, current_user, db)
+    keep_last = data.get("keep_last")
+    if isinstance(keep_last, bool) or not isinstance(keep_last, int) or not 1 <= keep_last <= 5000:
+        raise HTTPException(
+            status_code=422,
+            detail="keep_last must be an integer between 1 and 5000.",
+        )
+    older_ids = db.scalars(
+        select(Snapshot.id)
+        .where(Snapshot.workspace_id == workspace_id)
+        .order_by(Snapshot.id.desc())
+        .offset(keep_last)
+    ).all()
+    if older_ids:
+        db.query(Snapshot).filter(Snapshot.id.in_(older_ids)).delete(
+            synchronize_session=False
+        )
+        db.commit()
+    return {"deleted_count": len(older_ids), "kept_count": min(keep_last, db.scalar(
+        select(func.count(Snapshot.id)).where(Snapshot.workspace_id == workspace_id)
+    ) or 0)}

@@ -276,3 +276,11 @@ class CloudClient:
             f"{self.base_url}/workspaces/{workspace_id}/snapshots/{snapshot_id}",
             method="DELETE",
         )
+
+
+    def prune_snapshots(self, workspace_id, keep_last):
+        return self._request(
+            f"{self.base_url}/workspaces/{workspace_id}/snapshots/retention",
+            data=json.dumps({"keep_last": keep_last}).encode("utf-8"),
+            method="POST",
+        )
