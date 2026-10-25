@@ -624,6 +624,11 @@ class DashboardView(QWidget):
         self.workspace_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
         self.workspace_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
         self.workspace_table.itemSelectionChanged.connect(self._workspace_table_selection_changed)
+        self.workspace_empty_label = make_label(
+            "No workspaces yet. Create one to organize your snapshots.",
+            muted=True,
+        )
+        workspaces_layout.addWidget(self.workspace_empty_label)
         workspaces_layout.addWidget(self.workspace_table, 1)
         workspace_buttons = QHBoxLayout()
         page_new_workspace = QPushButton("+  New workspace")
@@ -805,6 +810,8 @@ class DashboardView(QWidget):
             self.workspace_table.setItem(row, 1, QTableWidgetItem(self._format_date(workspace.get("created_at"))))
             self.workspace_table.setItem(row, 2, QTableWidgetItem(self._format_date(workspace.get("updated_at"))))
         self.workspace_table.blockSignals(False)
+        self.workspace_empty_label.setVisible(not bool(self.workspaces))
+        self.workspace_table.setVisible(bool(self.workspaces))
         self._select_workspace_table_row(self.workspace_id)
         self._log(f"{len(self.workspaces)} workspace(s) loaded")
         if self.workspace_id is not None:

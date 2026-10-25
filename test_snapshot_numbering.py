@@ -2,6 +2,9 @@
 
 import os
 
+import pytest
+from fastapi import HTTPException
+
 # The route imports the database module at import time. Use a harmless local
 # SQLite URL for these tests; no external database is contacted.
 os.environ.setdefault("DATABASE_URL", "sqlite://")
@@ -17,7 +20,7 @@ from server.app.models.workspace import Workspace
 from server.app.routes.snapshots import create_snapshot, list_snapshots
 
 
-def test_snapshot_numbers_are_independent_per_user_and_span_workspaces():
+def test_snapshot_numbers_reset_for_each_workspace_and_user():
     engine = create_engine("sqlite://")
     Base.metadata.create_all(engine)
 
@@ -68,5 +71,25 @@ def test_snapshot_numbers_are_independent_per_user_and_span_workspaces():
         assert first["id"] != other_users_first["id"]
         assert first["snapshot_number"] == other_users_first["snapshot_number"]
 
+    Base.metadata.drop_all(engine)
+    engine.dispose()
+
+
+
+def test_future_snapshot_format_is_rejected():
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    with Session(engine) as db:
+        user = User(email="future@example.test", password_hash="unused")
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+        workspace = Workspace(user_id=user.id, name="Future")
+        db.add(workspace)
+        db.commit()
+        db.refresh(workspace)
+        with pytest.raises(HTTPException) as error:
+            create_snapshot(workspace.id, {"version": 6}, db, user)
+        assert error.value.status_code == 422
     Base.metadata.drop_all(engine)
     engine.dispose()
