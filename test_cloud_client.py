@@ -90,7 +90,6 @@ def test_snapshot_upload_adds_a_valid_integrity_checksum(monkeypatch):
 
 def test_snapshot_upload_prunes_largest_project_file_to_fit_gateway_limit(monkeypatch):
     import base64
-    import gzip
     import random
 
     client = CloudClient(base_url="https://example.invalid")
@@ -102,11 +101,9 @@ def test_snapshot_upload_prunes_largest_project_file_to_fit_gateway_limit(monkey
     encoded = base64.b64encode(random_bytes).decode("ascii")
 
     def fake_request(url, data=None, method="GET", content_encoding=None):
-        captured["compressed_bytes"] = len(data)
-        captured["payload"] = json.loads(
-            gzip.decompress(data).decode("utf-8")
-            if content_encoding == "gzip" else data.decode("utf-8")
-        )
+        captured["request_bytes"] = len(data)
+        captured["payload"] = json.loads(data.decode("utf-8"))
+        captured["content_encoding"] = content_encoding
         captured["method"] = method
         return {"id": 9, "snapshot_number": 1}
 
@@ -131,8 +128,9 @@ def test_snapshot_upload_prunes_largest_project_file_to_fit_gateway_limit(monkey
     result = client.create_snapshot(3, SnapshotStub())
     assert result["id"] == 9
     assert captured["method"] == "POST"
-    from oryn.cloud.client import MAX_COMPRESSED_SNAPSHOT_BYTES
-    assert captured["compressed_bytes"] <= MAX_COMPRESSED_SNAPSHOT_BYTES
+    from oryn.cloud.client import MAX_SNAPSHOT_REQUEST_BYTES
+    assert captured["request_bytes"] <= MAX_SNAPSHOT_REQUEST_BYTES
+    assert captured["content_encoding"] is None
     assert captured["payload"]["project"]["files"] == []
     assert captured["payload"]["project"]["omitted_files"] == ["assets/large.bin"]
     assert result["_client_capture"]["omitted_project_files"] == ["assets/large.bin"]

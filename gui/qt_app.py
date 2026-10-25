@@ -1316,7 +1316,7 @@ class DashboardView(QWidget):
             f"{metrics.get('file_count', 0)} open editor files · "
             f"{capture_info.get('project_files_included', metrics.get('project_file_count', 0))} project files · "
             f"{metrics.get('browser_url_count', 0)} browser tabs · "
-            f"upload {capture_info.get('compressed_bytes', 0) / 1024:.0f} KiB · "
+            f"upload {capture_info.get('request_bytes', 0) / 1024:.0f} KiB · "
             f"total {metrics.get('total_seconds', 0):.1f}s "
             f"(editor {metrics.get('vscode_seconds', 0):.1f}s, "
             f"browser {metrics.get('browser_seconds', 0):.1f}s, "
