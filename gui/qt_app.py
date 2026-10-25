@@ -120,29 +120,49 @@ def show_error_dialog(parent, message: str):
         QApplication.clipboard().setText(message)
 
 
+class TaskCancelled(Exception):
+    """Raised when a task reaches a safe cancellation checkpoint."""
+
+
 class Task(QThread):
     succeeded = Signal(object)
     failed = Signal(str)
+    cancelled = Signal(str)
     progress = Signal(str)
 
     def __init__(self, function, report_progress=False):
         super().__init__()
         self.function = function
-        self.report_progress = report_progress
+        self.reports_progress = report_progress
+        self._cancel_requested = threading.Event()
+
+    def request_cancel(self):
+        self._cancel_requested.set()
+
+    def report_progress(self, message):
+        if self._cancel_requested.is_set():
+            raise TaskCancelled("Operation cancelled.")
+        self.progress.emit(message)
 
     def run(self):
         try:
-            result = self.function(self.progress.emit) if self.report_progress else self.function()
+            result = (
+                self.function(self.report_progress)
+                if self.reports_progress else self.function()
+            )
             self.succeeded.emit(result)
+        except TaskCancelled as exc:
+            self.cancelled.emit(str(exc) or "Operation cancelled.")
         except Exception as exc:
             self.failed.emit(error_message(exc))
 
 
-def run_task(owner, function, on_success, on_error, on_progress=None):
+def run_task(owner, function, on_success, on_error, on_progress=None, on_cancel=None):
     task = Task(function, report_progress=on_progress is not None)
     owner._tasks.add(task)
     task.succeeded.connect(on_success)
     task.failed.connect(on_error)
+    task.cancelled.connect(on_cancel or (lambda _message: None))
     if on_progress is not None:
         task.progress.connect(on_progress)
     task.finished.connect(lambda task=task: owner._tasks.discard(task))
@@ -481,6 +501,10 @@ class DashboardView(QWidget):
         self.refresh_button = QPushButton("↻  Refresh")
         self.refresh_button.clicked.connect(self.load_workspaces)
         top_layout.addWidget(self.refresh_button)
+        self.cancel_button = QPushButton("Cancel operation")
+        self.cancel_button.clicked.connect(self._cancel_current_task)
+        self.cancel_button.setVisible(False)
+        top_layout.addWidget(self.cancel_button)
         main_col.addWidget(top)
 
         scroll = QScrollArea()
@@ -757,11 +781,39 @@ class DashboardView(QWidget):
                 self.session_expired.emit("Your saved session is no longer valid. Sign in again.")
                 return
             show_error_dialog(self, message)
+        def cancelled(message):
+            self._set_busy(False)
+            self._log(message)
         self._log(activity)
-        run_task(self, function, done, failed, on_progress=on_progress)
+        self.current_task = run_task(
+            self, function, done, failed,
+            on_progress=on_progress,
+            on_cancel=cancelled,
+        )
+        self._update_cancel_visibility()
+
+    def _cancel_current_task(self):
+        task = getattr(self, "current_task", None)
+        if task is None or not task.isRunning() or not task.reports_progress:
+            return
+        task.request_cancel()
+        self.cancel_button.setEnabled(False)
+        self.status_label.setText(
+            "Cancellation requested. Waiting for the next safe checkpoint…"
+        )
+
+    def _update_cancel_visibility(self):
+        task = getattr(self, "current_task", None)
+        can_cancel = bool(
+            self.busy and task is not None and task.reports_progress and task.isRunning()
+        )
+        self.cancel_button.setVisible(can_cancel)
+        self.cancel_button.setEnabled(can_cancel)
 
     def _set_busy(self, busy):
         self.busy = busy
+        self.cancel_button.setVisible(False)
+        self.cancel_button.setEnabled(False)
         self.capture_button.setEnabled(not busy)
         self.restore_button.setEnabled(
             not busy and bool(self.snapshot_table.selectedItems())
