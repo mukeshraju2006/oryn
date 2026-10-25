@@ -114,10 +114,9 @@ def show_error_dialog(parent, message: str):
     )
     dialog.setMinimumWidth(560)
     copy_button = dialog.addButton("Copy error", QMessageBox.ActionRole)
+    copy_button.clicked.connect(lambda: QApplication.clipboard().setText(message))
     dialog.addButton(QMessageBox.Close)
     dialog.exec()
-    if dialog.clickedButton() is copy_button:
-        QApplication.clipboard().setText(message)
 
 
 class TaskCancelled(Exception):
