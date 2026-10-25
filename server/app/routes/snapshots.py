@@ -161,6 +161,7 @@ def list_snapshots(
             "application": (snapshot.data or {}).get("application", "workspace"),
             "file_count": len((snapshot.data or {}).get("files") or []),
             "browser_url_count": len((snapshot.data or {}).get("browser_urls") or []),
+            "project_path": ((snapshot.data or {}).get("workspace") or {}).get("path", ""),
         }
         for snapshot, snapshot_number in numbered_snapshots
     ]

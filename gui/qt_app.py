@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import sys
 import threading
+import time
 from datetime import datetime, timedelta
 from urllib.error import HTTPError, URLError
 
@@ -562,9 +563,9 @@ class DashboardView(QWidget):
         self.snapshot_search.textChanged.connect(self._filter_snapshots)
         filter_row.addWidget(self.snapshot_search, 1)
         table_col.addLayout(filter_row)
-        self.snapshot_table = QTableWidget(0, 6)
+        self.snapshot_table = QTableWidget(0, 7)
         self.snapshot_table.setHorizontalHeaderLabels(
-            ["SNAPSHOT", "APPLICATION", "CAPTURED", "FILES", "FORMAT", "ACTIONS"]
+            ["SNAPSHOT", "APPLICATION", "CAPTURED", "FILES", "PROJECT", "FORMAT", "ACTIONS"]
         )
         self.snapshot_table.verticalHeader().setVisible(False)
         self.snapshot_table.setShowGrid(False)
@@ -815,7 +816,11 @@ class DashboardView(QWidget):
             created = self._format_date(snapshot.get("created_at"))
             version = snapshot.get("version", "—")
             file_count = snapshot.get("file_count", "—")
-            values = [f"Snapshot {number}", application, created, str(file_count), f"v{version}"]
+            project_path = snapshot.get("project_path") or "—"
+            values = [
+                f"Snapshot {number}", application, created, str(file_count),
+                project_path, f"v{version}",
+            ]
             for col, value in enumerate(values):
                 item = QTableWidgetItem(str(value))
                 if col == 0:
@@ -847,7 +852,7 @@ class DashboardView(QWidget):
             action_layout.addWidget(details_button)
             action_layout.addWidget(restore_button)
             action_layout.addWidget(delete_button)
-            self.snapshot_table.setCellWidget(row, 5, actions)
+            self.snapshot_table.setCellWidget(row, 6, actions)
             self.snapshot_table.setRowHeight(row, 48)
         self._filter_snapshots(self.snapshot_search.text())
         self.snapshot_count_label.setText(f"{len(self.snapshots)} record(s)")
@@ -861,7 +866,7 @@ class DashboardView(QWidget):
         for row in range(self.snapshot_table.rowCount()):
             searchable = " ".join(
                 self.snapshot_table.item(row, col).text()
-                for col in range(5)
+                for col in range(6)
                 if self.snapshot_table.item(row, col) is not None
             ).casefold()
             hidden = bool(query) and query not in searchable
@@ -991,10 +996,15 @@ class DashboardView(QWidget):
         workspace_id = self.workspace_id
         workspaces_count = len(self.workspaces)
         def operation(progress):
+            started = time.perf_counter()
             progress("Inspecting VS Code workspace and editor state…")
+            vscode_started = time.perf_counter()
             snapshot = VSCodeAdapter().capture(progress=progress)
+            vscode_seconds = time.perf_counter() - vscode_started
             progress("Reading Chrome session data…")
+            browser_started = time.perf_counter()
             browser_urls = BrowserAdapter().capture_urls()
+            browser_seconds = time.perf_counter() - browser_started
             if snapshot is not None:
                 snapshot.browser_urls = browser_urls
             elif browser_urls:
@@ -1010,8 +1020,21 @@ class DashboardView(QWidget):
                 created = self.client.create_workspace(f"Oryn Workspace {workspaces_count + 1}")
                 target_id = created["id"]
             progress("Compressing snapshot and uploading to Oryn Cloud…")
+            upload_started = time.perf_counter()
             result = self.client.create_snapshot(target_id, snapshot)
-            return {"result": result, "workspace_id": target_id}
+            upload_seconds = time.perf_counter() - upload_started
+            return {
+                "result": result,
+                "workspace_id": target_id,
+                "metrics": {
+                    "vscode_seconds": vscode_seconds,
+                    "browser_seconds": browser_seconds,
+                    "upload_seconds": upload_seconds,
+                    "total_seconds": time.perf_counter() - started,
+                    "file_count": len(snapshot.files or []),
+                    "browser_url_count": len(browser_urls or []),
+                },
+            }
         self._task(
             operation,
             self._capture_done,
@@ -1022,7 +1045,16 @@ class DashboardView(QWidget):
     def _capture_done(self, result):
         snap = result["result"]
         self.workspace_id = result["workspace_id"]
-        self._log(f"Snapshot {snap.get('snapshot_number', snap.get('id', '?'))} saved to Oryn Cloud")
+        metrics = result.get("metrics", {})
+        self._log(
+            f"Snapshot {snap.get('snapshot_number', snap.get('id', '?'))} saved · "
+            f"{metrics.get('file_count', 0)} files · "
+            f"{metrics.get('browser_url_count', 0)} browser tabs · "
+            f"total {metrics.get('total_seconds', 0):.1f}s "
+            f"(editor {metrics.get('vscode_seconds', 0):.1f}s, "
+            f"browser {metrics.get('browser_seconds', 0):.1f}s, "
+            f"upload {metrics.get('upload_seconds', 0):.1f}s)"
+        )
         self.load_workspaces()
 
     def show_snapshot_details(self, snapshot_id, workspace_id, number):
