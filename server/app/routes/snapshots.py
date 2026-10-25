@@ -158,6 +158,9 @@ def list_snapshots(
             "snapshot_number": snapshot_number,
             "version": snapshot.version,
             "created_at": snapshot.created_at,
+            "application": (snapshot.data or {}).get("application", "workspace"),
+            "file_count": len((snapshot.data or {}).get("files") or []),
+            "browser_url_count": len((snapshot.data or {}).get("browser_urls") or []),
         }
         for snapshot, snapshot_number in numbered_snapshots
     ]
@@ -199,3 +202,24 @@ def get_snapshot(
         )
 
     return snapshot.data
+
+
+@router.delete("/{workspace_id}/snapshots/{snapshot_id}")
+def delete_snapshot(
+    workspace_id: int,
+    snapshot_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    get_user_workspace(workspace_id, current_user, db)
+    snapshot = db.scalar(
+        select(Snapshot).where(
+            Snapshot.id == snapshot_id,
+            Snapshot.workspace_id == workspace_id,
+        )
+    )
+    if snapshot is None:
+        raise HTTPException(status_code=404, detail="Snapshot not found")
+    db.delete(snapshot)
+    db.commit()
+    return {"deleted": True, "snapshot_id": snapshot_id}

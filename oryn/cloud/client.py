@@ -257,3 +257,22 @@ class CloudClient:
         return self._request(
             url
         )
+
+    def rename_workspace(self, workspace_id, name):
+        return self._request(
+            f"{self.base_url}/workspaces/{workspace_id}",
+            data=json.dumps({"name": name}).encode("utf-8"),
+            method="PATCH",
+        )
+
+    def delete_workspace(self, workspace_id):
+        return self._request(
+            f"{self.base_url}/workspaces/{workspace_id}",
+            method="DELETE",
+        )
+
+    def delete_snapshot(self, workspace_id, snapshot_id):
+        return self._request(
+            f"{self.base_url}/workspaces/{workspace_id}/snapshots/{snapshot_id}",
+            method="DELETE",
+        )

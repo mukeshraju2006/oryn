@@ -432,6 +432,14 @@ class DashboardView(QWidget):
         self.new_workspace_button = QPushButton("+  New workspace")
         self.new_workspace_button.clicked.connect(self.create_workspace)
         side.addWidget(self.new_workspace_button)
+        workspace_actions = QHBoxLayout()
+        self.rename_workspace_button = QPushButton("Rename")
+        self.rename_workspace_button.clicked.connect(self.rename_workspace)
+        self.delete_workspace_button = QPushButton("Delete")
+        self.delete_workspace_button.clicked.connect(self.delete_workspace)
+        workspace_actions.addWidget(self.rename_workspace_button)
+        workspace_actions.addWidget(self.delete_workspace_button)
+        side.addLayout(workspace_actions)
         side.addStretch(1)
         side.addWidget(make_label("CLOUD CONNECTION", "eyebrow"))
         connection = QFrame()
@@ -544,9 +552,16 @@ class DashboardView(QWidget):
         table_head.addWidget(self.snapshot_count_label)
         table_col.addLayout(table_head)
         table_col.addWidget(make_label("Select a snapshot to restore that saved state.", muted=True))
-        self.snapshot_table = QTableWidget(0, 6)
+        filter_row = QHBoxLayout()
+        self.snapshot_search = QLineEdit()
+        self.snapshot_search.setPlaceholderText("Search snapshot history…")
+        self.snapshot_search.setClearButtonEnabled(True)
+        self.snapshot_search.textChanged.connect(self._filter_snapshots)
+        filter_row.addWidget(self.snapshot_search, 1)
+        table_col.addLayout(filter_row)
+        self.snapshot_table = QTableWidget(0, 7)
         self.snapshot_table.setHorizontalHeaderLabels(
-            ["SNAPSHOT", "APPLICATION", "CAPTURED", "FORMAT", "DETAILS", "ACTION"]
+            ["SNAPSHOT", "APPLICATION", "CAPTURED", "FILES", "FORMAT", "DETAILS", "ACTIONS"]
         )
         self.snapshot_table.verticalHeader().setVisible(False)
         self.snapshot_table.setShowGrid(False)
@@ -554,7 +569,7 @@ class DashboardView(QWidget):
         self.snapshot_table.setSelectionMode(QAbstractItemView.SingleSelection)
         self.snapshot_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.snapshot_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
-        for column in range(1, 6):
+        for column in range(1, 7):
             self.snapshot_table.horizontalHeader().setSectionResizeMode(
                 column, QHeaderView.ResizeToContents
             )
@@ -631,7 +646,10 @@ class DashboardView(QWidget):
         )
         self.refresh_button.setEnabled(not busy)
         self.new_workspace_button.setEnabled(not busy)
+        self.rename_workspace_button.setEnabled(not busy and self.workspace_id is not None)
+        self.delete_workspace_button.setEnabled(not busy and self.workspace_id is not None)
         self.workspace_combo.setEnabled(not busy)
+        self.snapshot_search.setEnabled(not busy)
         self.snapshot_table.setEnabled(not busy)
         self.logout_button.setEnabled(not busy)
 
@@ -694,7 +712,8 @@ class DashboardView(QWidget):
             application = str(snapshot.get("application") or "workspace").replace("_", " ").title()
             created = self._format_date(snapshot.get("created_at"))
             version = snapshot.get("version", "—")
-            values = [f"Snapshot {number}", application, created, f"v{version}"]
+            file_count = snapshot.get("file_count", "—")
+            values = [f"Snapshot {number}", application, created, str(file_count), f"v{version}"]
             for col, value in enumerate(values):
                 item = QTableWidgetItem(str(value))
                 if col == 0:
@@ -714,13 +733,111 @@ class DashboardView(QWidget):
                 lambda checked=False, sid=snapshot_id, wid=workspace_id:
                     self.restore_snapshot(snapshot_id=sid, workspace_id=wid)
             )
-            self.snapshot_table.setCellWidget(row, 4, details_button)
-            self.snapshot_table.setCellWidget(row, 5, restore_button)
+            actions = QWidget()
+            action_layout = QHBoxLayout(actions)
+            action_layout.setContentsMargins(2, 2, 2, 2)
+            action_layout.setSpacing(4)
+            delete_button = QPushButton("Delete")
+            delete_button.clicked.connect(
+                lambda checked=False, sid=snapshot_id, wid=workspace_id, num=number:
+                    self.delete_snapshot(sid, wid, num)
+            )
+            action_layout.addWidget(details_button)
+            action_layout.addWidget(restore_button)
+            action_layout.addWidget(delete_button)
+            self.snapshot_table.setCellWidget(row, 5, details_button)
+            self.snapshot_table.setCellWidget(row, 6, actions)
             self.snapshot_table.setRowHeight(row, 48)
+        self._filter_snapshots(self.snapshot_search.text())
         self.snapshot_count_label.setText(f"{len(self.snapshots)} record(s)")
         if self.snapshot_table.rowCount():
             self.snapshot_table.selectRow(0)
         self._selection_changed()
+
+    def _filter_snapshots(self, query):
+        query = (query or "").strip().casefold()
+        visible = 0
+        for row in range(self.snapshot_table.rowCount()):
+            searchable = " ".join(
+                self.snapshot_table.item(row, col).text()
+                for col in range(5)
+                if self.snapshot_table.item(row, col) is not None
+            ).casefold()
+            hidden = bool(query) and query not in searchable
+            self.snapshot_table.setRowHidden(row, hidden)
+            visible += not hidden
+        if hasattr(self, "snapshot_count_label"):
+            total = len(self.snapshots)
+            self.snapshot_count_label.setText(
+                f"{visible} shown · {total} total" if query else f"{total} record(s)"
+            )
+
+    def rename_workspace(self):
+        if self.busy or self.workspace_id is None:
+            return
+        current = self.workspace_combo.currentText()
+        name, accepted = QInputDialog.getText(
+            self, "Rename workspace", "Workspace name:", text=current
+        )
+        if not accepted:
+            return
+        name = name.strip()
+        if not name:
+            QMessageBox.information(self, "Workspace name", "Enter a workspace name.")
+            return
+        workspace_id = self.workspace_id
+        self._task(
+            lambda: self.client.rename_workspace(workspace_id, name),
+            lambda result: self._workspace_renamed(result),
+            "Renaming workspace…",
+        )
+
+    def _workspace_renamed(self, result):
+        self._log(f"Workspace renamed: {result.get('name', 'Workspace')}")
+        self.load_workspaces()
+
+    def delete_workspace(self):
+        if self.busy or self.workspace_id is None:
+            return
+        workspace_id = self.workspace_id
+        name = self.workspace_combo.currentText()
+        answer = QMessageBox.warning(
+            self, "Delete workspace",
+            f"Delete '{name}' and every snapshot inside it? This cannot be undone.",
+            QMessageBox.Yes | QMessageBox.Cancel, QMessageBox.Cancel,
+        )
+        if answer != QMessageBox.Yes:
+            return
+        self._task(
+            lambda: self.client.delete_workspace(workspace_id),
+            lambda _result: self._workspace_deleted(name),
+            "Deleting workspace…",
+        )
+
+    def _workspace_deleted(self, name):
+        self.workspace_id = None
+        self._log(f"Workspace deleted: {name}")
+        self.load_workspaces()
+
+    def delete_snapshot(self, snapshot_id, workspace_id, number):
+        if self.busy or snapshot_id is None or workspace_id is None:
+            return
+        answer = QMessageBox.warning(
+            self, "Delete snapshot",
+            f"Delete Snapshot {number}? This cannot be undone.",
+            QMessageBox.Yes | QMessageBox.Cancel, QMessageBox.Cancel,
+        )
+        if answer != QMessageBox.Yes:
+            return
+        self._task(
+            lambda: self.client.delete_snapshot(workspace_id, snapshot_id),
+            lambda _result: self._snapshot_deleted(number),
+            f"Deleting snapshot {number}…",
+        )
+
+    def _snapshot_deleted(self, number):
+        self._log(f"Snapshot {number} deleted")
+        self.load_snapshots()
 
     @staticmethod
     def _format_date(value):
