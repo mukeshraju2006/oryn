@@ -234,7 +234,7 @@ chmod +x Oryn-0.1.0-x86_64.AppImage
 Run:
 
 ```bash
-./Oryn-0.1.0-linux-x86_64.AppImage
+./Oryn-0.1.0-x86_64.AppImage
 ```
 
 The distributed AppImage does not require Python or a Python virtual environment.
@@ -435,7 +435,7 @@ pip install -r requirements.txt
 Run Oryn:
 
 ```powershell
-python -m gui.app
+python -m oryn
 ```
 
 ---
