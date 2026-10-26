@@ -24,6 +24,10 @@ class SnapshotUpload(Base):
     chunk_count: Mapped[int] = mapped_column(Integer, nullable=False)
     total_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
     sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    # CHANGED: Keep a completion receipt so a lost finalize response is safe to retry.
+    snapshot_id: Mapped[int | None] = mapped_column(
+        ForeignKey("snapshots.id", ondelete="SET NULL"), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime,
         default=lambda: datetime.now(timezone.utc).replace(tzinfo=None),
