@@ -1,10 +1,8 @@
 import base64
-import gzip
 import hashlib
 import json
 import os
 import time
-import uuid
 import urllib.request
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
