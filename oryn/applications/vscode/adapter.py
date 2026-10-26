@@ -1005,25 +1005,28 @@ class VSCodeAdapter:
         project_files = []
         directories = []
 
-        if (
-            not workspace.exists()
-            or not workspace.is_dir()
-        ):
-            return {
-                "root": ".",
-                "directories": [],
-                "files": [],
-            }
+        if not workspace.exists() or not workspace.is_dir():
+            raise FileNotFoundError(
+                f"Workspace directory does not exist or is not accessible: {workspace}"
+            )
 
         # CHANGED:
         # os.walk lets us prune dependency/cache directories before
         # entering them, instead of recursively scanning their contents.
         scanned_files = 0
+
+        def fail_on_walk_error(error):
+            # CHANGED: A permission or traversal error must fail capture instead
+            # of silently producing a snapshot with missing workspace files.
+            raise RuntimeError(
+                f"Could not scan workspace directory {error.filename}: {error}"
+            ) from error
+
         for (
             current_root,
             directory_names,
             file_names,
-        ) in os.walk(workspace):
+        ) in os.walk(workspace, onerror=fail_on_walk_error):
 
             current_path = Path(
                 current_root
@@ -1116,10 +1119,10 @@ class VSCodeAdapter:
                     )
 
                 except OSError as error:
-                    print(
-                        f"Could not capture project file "
-                        f"{file_path}: {error}"
-                    )
+                    # CHANGED: Never mark a partial filesystem scan as complete.
+                    raise RuntimeError(
+                        f"Could not capture workspace file {file_path}: {error}"
+                    ) from error
 
         if progress:
             progress(f"Project scan complete: {len(project_files)} files captured")
