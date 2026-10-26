@@ -283,18 +283,9 @@ class CloudClient:
                     if last_error is not None:
                         raise last_error
                     request_count += 1
-
-                result = self._request(
-                    f"{self.base_url}/workspaces/{workspace_id}"
-                    f"/snapshot-uploads/{upload_id}/finalize",
-                    data=b"{}",
-                    method="POST",
-                )
-                request_count += 1
-                upload_mode = "verified-chunked"
             except Exception:
-                # Best-effort cleanup. The original error remains the useful
-                # failure shown to the user; no partial snapshot is finalized.
+                # A failed chunk cannot produce a snapshot. Clean up staged
+                # data; if cleanup fails, the server retains no visible snapshot.
                 try:
                     self._request(
                         f"{self.base_url}/workspaces/{workspace_id}"
@@ -304,6 +295,34 @@ class CloudClient:
                 except Exception:
                     pass
                 raise
+
+            # CHANGED: Finalize is safe to retry because the server retains an
+            # idempotent receipt even if the first response was lost.
+            finalize_url = (
+                f"{self.base_url}/workspaces/{workspace_id}"
+                f"/snapshot-uploads/{upload_id}/finalize"
+            )
+            last_error = None
+            for attempt in range(3):
+                try:
+                    result = self._request(
+                        finalize_url, data=b"{}", method="POST",
+                    )
+                    last_error = None
+                    request_count += 1
+                    break
+                except HTTPError as error:
+                    if error.code not in (408, 429, 500, 502, 503, 504) or attempt == 2:
+                        raise
+                    last_error = error
+                except URLError as error:
+                    if attempt == 2:
+                        raise
+                    last_error = error
+                time.sleep(0.4 * (attempt + 1))
+            if last_error is not None:
+                raise last_error
+            upload_mode = "verified-chunked"
 
         if isinstance(result, dict):
             project = payload.get("project")
