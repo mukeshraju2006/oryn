@@ -7,7 +7,7 @@ import re
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from server.app.database import get_db
@@ -188,6 +188,28 @@ def finalize_snapshot_upload(
     if upload is None:
         raise HTTPException(status_code=404, detail="Snapshot upload not found or already finalized.")
 
+    # CHANGED: Finalize is idempotent if the response to a previous finalize
+    # was lost after the database committed the snapshot.
+    if upload.snapshot_id is not None:
+        saved = db.get(Snapshot, upload.snapshot_id)
+        if saved is not None:
+            number = db.scalar(
+                select(func.count(Snapshot.id)).where(
+                    Snapshot.workspace_id == workspace_id,
+                    Snapshot.id <= saved.id,
+                )
+            ) or 1
+            return {
+                "id": saved.id,
+                "workspace_id": saved.workspace_id,
+                "snapshot_number": number,
+                "version": saved.version,
+                "created_at": saved.created_at,
+                "uploaded_bytes": upload.total_bytes,
+                "verified": True,
+                "already_finalized": True,
+            }
+
     chunks = db.scalars(
         select(SnapshotUploadChunk)
         .where(SnapshotUploadChunk.upload_id == upload_id)
@@ -222,7 +244,14 @@ def finalize_snapshot_upload(
             Snapshot.id <= snapshot.id,
         )
     ) or 1
-    db.delete(upload)  # staged chunks cascade away only after the snapshot is valid
+    # CHANGED: Retain the upload receipt for idempotent finalize retries,
+    # but discard staged bytes once the complete snapshot has been committed.
+    upload.snapshot_id = snapshot.id
+    db.execute(
+        delete(SnapshotUploadChunk).where(
+            SnapshotUploadChunk.upload_id == upload_id
+        )
+    )
     db.commit()
     db.refresh(snapshot)
     return {
@@ -252,6 +281,8 @@ def cancel_snapshot_upload(
         )
     )
     if upload is not None:
+        if upload.snapshot_id is not None:
+            return {"cancelled": False, "finalized": True, "snapshot_id": upload.snapshot_id}
         db.delete(upload)
         db.commit()
     return {"cancelled": True}
