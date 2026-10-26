@@ -5,6 +5,7 @@ import hmac
 import json
 import re
 import uuid
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import delete, func, select
@@ -83,13 +84,19 @@ def begin_snapshot_upload(
     current_user: User = Depends(get_current_user),
 ):
     _owned_workspace(workspace_id, current_user, db)
+    # CHANGED: Reclaim abandoned uploads and old completion receipts.
+    expired_before = (datetime.now(timezone.utc) - timedelta(days=1)).replace(tzinfo=None)
+    db.execute(
+        delete(SnapshotUpload).where(SnapshotUpload.created_at < expired_before)
+    )
+    db.commit()
     total_bytes = data.get("total_bytes")
     chunk_count = data.get("chunk_count")
     digest = data.get("sha256")
     if isinstance(total_bytes, bool) or not isinstance(total_bytes, int) or not 1 <= total_bytes <= MAX_UPLOAD_BYTES:
         raise HTTPException(status_code=413, detail="Upload size must be between 1 byte and 256 MiB.")
     expected_chunks = (total_bytes + CHUNK_BYTES - 1) // CHUNK_BYTES
-    if isinstance(chunk_count, bool) or chunk_count != expected_chunks:
+    if isinstance(chunk_count, bool) or not isinstance(chunk_count, int) or chunk_count != expected_chunks:
         raise HTTPException(status_code=422, detail="Chunk count does not match the declared upload size.")
     if not isinstance(digest, str) or re.fullmatch(r"[0-9a-f]{64}", digest) is None:
         raise HTTPException(status_code=422, detail="A lowercase SHA-256 upload digest is required.")
