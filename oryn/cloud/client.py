@@ -1,9 +1,10 @@
-import copy
+import base64
 import gzip
 import hashlib
 import json
 import os
 import time
+import uuid
 import urllib.request
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
@@ -195,99 +196,120 @@ class CloudClient:
         }
 
     # CHANGED:
-    # Create an authenticated snapshot.
+    # Create a complete authenticated snapshot. Large payloads are chunked;
+    # project files are never pruned to fit an HTTP request limit.
     def create_snapshot(
         self,
         workspace_id,
         snapshot,
     ):
-        # Keep the actual HTTP request body comfortably below serverless gateway
-        # limits. Plain JSON avoids gateways transparently transforming gzip
-        # request bodies while leaving Content-Encoding unchanged.
-        original_payload = copy.deepcopy(snapshot.to_dict())
-        project = original_payload.get("project")
-        project_files = (
-            list(project.get("files") or [])
-            if isinstance(project, dict) else []
-        )
-        existing_omitted = (
-            list(project.get("omitted_files") or [])
-            if isinstance(project, dict) else []
-        )
-        largest_first = sorted(
-            project_files,
-            key=lambda item: len(str(item.get("data") or "")),
-            reverse=True,
-        )
-
-        def encode_payload(omitted_count):
-            payload = copy.deepcopy(original_payload)
-            current_project = payload.get("project")
-            removed = largest_first[:omitted_count]
-            if removed and isinstance(current_project, dict):
-                removed_paths = {
-                    str(item.get("path", "unknown")) for item in removed
-                }
-                current_project["files"] = [
-                    item for item in project_files
-                    if str(item.get("path", "unknown")) not in removed_paths
-                ]
-                current_project["omitted_files"] = sorted(
-                    set(existing_omitted) | removed_paths
-                )
-            canonical = json.dumps(
-                payload, separators=(",", ":"), ensure_ascii=False,
-                sort_keys=True,
-            ).encode("utf-8")
-            payload["_integrity"] = {
-                "algorithm": "sha256",
-                "digest": hashlib.sha256(canonical).hexdigest(),
-            }
-            raw_data = json.dumps(
-                payload, separators=(",", ":"), ensure_ascii=False,
-            ).encode("utf-8")
-            return payload, raw_data, removed
-
-        payload, raw_data, removed = encode_payload(0)
-        if len(raw_data) > MAX_SNAPSHOT_REQUEST_BYTES:
-            if not project_files or not isinstance(project, dict):
-                raise ValueError(
-                    "This snapshot is too large to upload safely. Oryn could not "
-                    "reduce the editor/browser state enough to fit the cloud upload "
-                    "limit. Close very large editor buffers or reduce the captured "
-                    "workspace state, then try again."
-                )
-            low, high = 1, len(largest_first)
-            best = None
-            while low <= high:
-                middle = (low + high) // 2
-                candidate = encode_payload(middle)
-                _, candidate_raw, _ = candidate
-                if len(candidate_raw) <= MAX_SNAPSHOT_REQUEST_BYTES:
-                    best = candidate
-                    high = middle - 1
-                else:
-                    low = middle + 1
-            if best is None:
-                raise ValueError(
-                    "This snapshot is still too large even after excluding all "
-                    "project files. Oryn kept your local workspace untouched and "
-                    "did not upload a partial snapshot. Close very large editor "
-                    "buffers or reduce the captured editor state, then try again."
-                )
-            payload, raw_data, removed = best
+        payload = snapshot.to_dict()
+        canonical = json.dumps(
+            payload, separators=(",", ":"), ensure_ascii=False, sort_keys=True,
+        ).encode("utf-8")
+        payload["_integrity"] = {
+            "algorithm": "sha256",
+            "digest": hashlib.sha256(canonical).hexdigest(),
+        }
+        raw_data = json.dumps(
+            payload, separators=(",", ":"), ensure_ascii=False,
+        ).encode("utf-8")
 
         url = f"{self.base_url}/workspaces/{workspace_id}/snapshots"
-        result = self._request(url, data=raw_data, method="POST")
+        if len(raw_data) <= MAX_SNAPSHOT_REQUEST_BYTES:
+            result = self._request(url, data=raw_data, method="POST")
+            request_count = 1
+            upload_mode = "single-request"
+        else:
+            # CHANGED: Split bytes, not JSON objects, so Unicode and base64
+            # file content survive exactly. The server verifies every chunk
+            # and the complete payload before making a snapshot visible.
+            chunk_bytes = 512 * 1024
+            upload_id = None
+            chunk_count = (len(raw_data) + chunk_bytes - 1) // chunk_bytes
+            if len(raw_data) > 256 * 1024 * 1024:
+                raise ValueError(
+                    "This workspace snapshot exceeds Oryn's current 256 MiB "
+                    "cloud upload limit. No files were removed or uploaded as "
+                    "a partial snapshot. Reduce the captured workspace size "
+                    "or use a future release with larger-payload storage."
+                )
+            upload_digest = hashlib.sha256(raw_data).hexdigest()
+            session = self._request(
+                f"{self.base_url}/workspaces/{workspace_id}/snapshot-uploads",
+                data=json.dumps({
+                    "total_bytes": len(raw_data),
+                    "chunk_count": chunk_count,
+                    "sha256": upload_digest,
+                }).encode("utf-8"),
+                method="POST",
+            )
+            upload_id = session["upload_id"]
+            chunk_bytes = int(session.get("chunk_bytes", chunk_bytes))
+            request_count = 1
+            try:
+                for index, offset in enumerate(range(0, len(raw_data), chunk_bytes)):
+                    chunk = raw_data[offset:offset + chunk_bytes]
+                    chunk_digest = hashlib.sha256(chunk).hexdigest()
+                    chunk_payload = json.dumps({
+                        "sha256": chunk_digest,
+                        "data": base64.b64encode(chunk).decode("ascii"),
+                    }, separators=(",", ":")).encode("utf-8")
+                    chunk_url = (
+                        f"{self.base_url}/workspaces/{workspace_id}"
+                        f"/snapshot-uploads/{upload_id}/chunks/{index}"
+                    )
+                    last_error = None
+                    for attempt in range(3):
+                        try:
+                            self._request(chunk_url, data=chunk_payload, method="PUT")
+                            last_error = None
+                            break
+                        except HTTPError as error:
+                            if error.code not in (408, 429, 500, 502, 503, 504) or attempt == 2:
+                                raise
+                            last_error = error
+                        except URLError as error:
+                            if attempt == 2:
+                                raise
+                            last_error = error
+                        time.sleep(0.4 * (attempt + 1))
+                    if last_error is not None:
+                        raise last_error
+                    request_count += 1
+
+                result = self._request(
+                    f"{self.base_url}/workspaces/{workspace_id}"
+                    f"/snapshot-uploads/{upload_id}/finalize",
+                    data=b"{}",
+                    method="POST",
+                )
+                request_count += 1
+                upload_mode = "verified-chunked"
+            except Exception:
+                # Best-effort cleanup. The original error remains the useful
+                # failure shown to the user; no partial snapshot is finalized.
+                try:
+                    self._request(
+                        f"{self.base_url}/workspaces/{workspace_id}"
+                        f"/snapshot-uploads/{upload_id}",
+                        method="DELETE",
+                    )
+                except Exception:
+                    pass
+                raise
+
         if isinstance(result, dict):
+            project = payload.get("project")
             result["_client_capture"] = {
-                "omitted_project_files": [
-                    str(item.get("path", "unknown")) for item in removed
-                ],
+                "omitted_project_files": [],
                 "request_bytes": len(raw_data),
                 "project_files_included": len(
-                    (payload.get("project") or {}).get("files") or []
-                ) if isinstance(payload.get("project"), dict) else 0,
+                    (project or {}).get("files") or []
+                ) if isinstance(project, dict) else 0,
+                "upload_mode": upload_mode,
+                "upload_requests": request_count,
+                "verified_bytes": len(raw_data),
             }
         return result
 
