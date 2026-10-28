@@ -2281,7 +2281,7 @@ class VSCodeAdapter:
                 continue
 
             parsed_path = self._snapshot_path(file_path)
-            if parsed_path is None or not parsed_path.is_file():
+            if parsed_path is None or not Path(str(parsed_path)).is_file():
                 continue
 
             normalized_path = str(parsed_path)
@@ -2303,7 +2303,7 @@ class VSCodeAdapter:
 
         if isinstance(active_file, str):
             parsed_active = self._snapshot_path(active_file)
-            if parsed_active is not None and parsed_active.is_file():
+            if parsed_active is not None and Path(str(parsed_active)).is_file():
                 active_path = str(parsed_active)
                 files_by_path.setdefault(
                     active_path,
