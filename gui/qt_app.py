@@ -37,93 +37,119 @@ except ImportError:
 
 
 APP_STYLE = """
-* { font-family: Inter, 'Segoe UI', sans-serif; font-size: 13px; }
-QMainWindow, QWidget#root, QWidget#page { background: #0b0e14; color: #eef1f8; }
-QWidget#sidebar { background: #0e121a; border-right: 1px solid #202634; }
-QWidget#topbar { background: #0b0e14; border-bottom: 1px solid #202634; }
-QLabel { color: #eef1f8; background: transparent; }
-QLabel#muted { color: #8b95a9; }
-QLabel#eyebrow { color: #8b95a9; font-size: 10px; font-weight: 700; letter-spacing: 1.5px; }
-QLabel#brand { font-size: 23px; font-weight: 800; letter-spacing: -0.8px; }
-QLabel#pageTitle { font-size: 28px; font-weight: 750; letter-spacing: -0.8px; }
-QLabel#heroTitle { font-size: 24px; font-weight: 750; }
-QLabel#metric { font-size: 29px; font-weight: 750; letter-spacing: -0.7px; }
-QLabel#metricLabel { color: #8b95a9; font-size: 11px; font-weight: 650; }
-QLabel#small { color: #8b95a9; font-size: 11px; }
-QFrame#card, QFrame#metricCard, QFrame#hero, QFrame#authCard {
-    background: #121722; border: 1px solid #242c3b; border-radius: 14px;
+* { font-family: Inter, 'Segoe UI', 'Noto Sans', sans-serif; font-size: 13px; }
+QMainWindow, QWidget#root, QWidget#page { background: #090c12; color: #edf1fa; }
+QWidget#sidebar { background: #0c111b; border-right: 1px solid #202b3d; }
+QWidget#topbar { background: #0b1019; border-bottom: 1px solid #202b3d; }
+QLabel { color: #edf1fa; background: transparent; }
+QLabel#muted { color: #97a3b8; }
+QLabel#eyebrow { color: #9ca8bf; font-size: 10px; font-weight: 750; letter-spacing: 1.4px; }
+QLabel#brand { font-size: 24px; font-weight: 850; letter-spacing: -0.9px; }
+QLabel#pageTitle { font-size: 29px; font-weight: 800; letter-spacing: -0.8px; }
+QLabel#heroTitle { font-size: 23px; font-weight: 780; }
+QLabel#metric { font-size: 30px; font-weight: 800; letter-spacing: -0.7px; }
+QLabel#metricLabel { color: #9ca8bf; font-size: 10px; font-weight: 750; letter-spacing: 0.8px; }
+QLabel#small { color: #9ca8bf; font-size: 11px; }
+QFrame#card, QFrame#metricCard, QFrame#authCard {
+    background: #111827; border: 1px solid #263247; border-radius: 16px;
 }
-QFrame#hero { background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 #171d2c, stop:0.65 #15192a, stop:1 #211a35); border: 1px solid #34304f; }
+QFrame#metricCard { background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 #141d2d, stop:1 #101624); }
+QFrame#hero { background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 #19243a, stop:0.52 #171d32, stop:1 #292047); border: 1px solid #3c4267; border-radius: 18px; }
+QFrame#card:hover, QFrame#metricCard:hover { border-color: #3a4965; }
 QPushButton {
-    background: #171d29; color: #dbe2ef; border: 1px solid #2a3344;
-    border-radius: 9px; padding: 10px 14px; font-weight: 600;
+    background: #172133; color: #e1e8f5; border: 1px solid #2d3a52;
+    border-radius: 10px; padding: 10px 15px; font-weight: 650;
 }
-QPushButton:hover { background: #20283a; border-color: #414c63; }
-QPushButton:disabled { color: #697386; background: #141923; border-color: #222a37; }
-QPushButton#primary { background: #8875ff; color: white; border: 1px solid #8875ff; }
-QPushButton#primary:hover { background: #9a8aff; }
-QPushButton#danger { background: #351a23; color: #ffdce2; border: 1px solid #703342; }
-QPushButton#danger:hover { background: #4a202c; border-color: #a44a60; }
-QPushButton#tableAction { padding: 5px 8px; min-width: 54px; min-height: 28px; max-height: 30px; border-radius: 6px; font-size: 11px; }
-QDialog { background: #10151f; color: #eef1f8; }
-QLabel#dialogTitle { color: #f4f5fb; font-size: 18px; font-weight: 750; }
-QLabel#dialogBody { color: #cbd3e2; font-size: 13px; }
-QPlainTextEdit#dialogDetails { background: #0b0f17; color: #dce3f1; border: 1px solid #2b3445; border-radius: 8px; padding: 8px; selection-background-color: #5548a5; }
-QPushButton#dialogPrimary, QPushButton#dialogDanger, QPushButton#dialogSecondary { min-width: 100px; min-height: 34px; padding: 7px 14px; }
-QPushButton#dialogPrimary { background: #8875ff; color: white; border: 1px solid #8875ff; }
-QPushButton#dialogPrimary:hover { background: #9a8aff; }
-QPushButton#dialogDanger { background: #8e3046; color: white; border: 1px solid #a8445b; }
-QPushButton#dialogDanger:hover { background: #a33b54; }
-QPushButton#dialogSecondary { background: #1b2230; color: #e2e7f2; border: 1px solid #354055; }
-QPushButton#nav { background: transparent; border: none; color: #8994a9; text-align: left; padding: 12px 14px; border-radius: 9px; font-weight: 600; }
-QPushButton#nav:hover { background: #171e2b; color: #f2f4fb; }
-QPushButton#navActive { background: #24213a; color: #c6bcff; border: 1px solid #383253; text-align: left; padding: 12px 14px; border-radius: 9px; font-weight: 700; }
+QPushButton:hover { background: #202d44; border-color: #58678a; }
+QPushButton:pressed { background: #131d2d; padding-top: 11px; padding-bottom: 9px; }
+QPushButton:disabled { color: #65718a; background: #121925; border-color: #222c3e; }
+QPushButton#primary { background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 #8875ff, stop:1 #6555dc); color: white; border: 1px solid #9b8cff; font-weight: 750; }
+QPushButton#primary:hover { background: #9b8cff; border-color: #b2a8ff; }
+QPushButton#danger { background: #351a27; color: #ffe4ec; border: 1px solid #754058; }
+QPushButton#danger:hover { background: #4a2134; border-color: #b45a7c; }
+QPushButton#tableAction { padding: 6px 9px; min-width: 54px; min-height: 29px; max-height: 31px; border-radius: 7px; font-size: 11px; }
+QDialog { background: #101827; color: #edf1fa; }
+QLabel#dialogTitle { color: #f5f6ff; font-size: 19px; font-weight: 800; }
+QLabel#dialogBody { color: #d0d8e8; font-size: 13px; }
+QPlainTextEdit#dialogDetails { background: #090e17; color: #dce5f4; border: 1px solid #2b3a51; border-radius: 10px; padding: 9px; selection-background-color: #5548a5; }
+QPushButton#dialogPrimary, QPushButton#dialogDanger, QPushButton#dialogSecondary { min-width: 100px; min-height: 36px; padding: 8px 15px; }
+QPushButton#dialogPrimary { background: #7c6af2; color: white; border: 1px solid #9a8cff; }
+QPushButton#dialogPrimary:hover { background: #9182ff; }
+QPushButton#dialogDanger { background: #8e304f; color: white; border: 1px solid #bd5b7b; }
+QPushButton#dialogDanger:hover { background: #a83c60; }
+QPushButton#dialogSecondary { background: #192337; color: #e2e9f6; border: 1px solid #34435d; }
+QPushButton#nav { background: transparent; border: 1px solid transparent; color: #9ba7bc; text-align: left; padding: 12px 14px; border-radius: 10px; font-weight: 650; }
+QPushButton#nav:hover { background: #151e2d; color: #f2f5fc; }
+QPushButton#navActive { background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 #292747, stop:1 #1c2236); color: #d3ccff; border: 1px solid #45416d; text-align: left; padding: 12px 14px; border-radius: 10px; font-weight: 750; }
 QLineEdit, QComboBox {
-    background: #0d1119; color: #f1f3fa; border: 1px solid #2b3445;
-    border-radius: 9px; padding: 11px 12px; selection-background-color: #5548a5;
+    background: #0c1320; color: #f1f4fb; border: 1px solid #2d3a50;
+    border-radius: 10px; padding: 11px 12px; selection-background-color: #5548a5;
 }
-QLineEdit:focus, QComboBox:focus { border-color: #8875ff; }
-QComboBox QAbstractItemView { background: #151b27; color: #eef1f8; selection-background-color: #383253; border: 1px solid #2b3445; }
-QTableWidget { background: #121722; color: #e6eaf3; border: none; gridline-color: #222a38; selection-background-color: #282443; selection-color: #ffffff; }
-QHeaderView::section { background: #151b26; color: #8b95a9; border: none; border-bottom: 1px solid #293143; padding: 12px; font-size: 10px; font-weight: 700; }
-QTableWidget::item { padding: 8px; border-bottom: 1px solid #202735; }
+QLineEdit:hover, QComboBox:hover { border-color: #465873; }
+QLineEdit:focus, QComboBox:focus { border: 1px solid #9385ff; background: #10182a; }
+QComboBox QAbstractItemView { background: #141d2c; color: #eef1f8; selection-background-color: #383253; border: 1px solid #2d3a50; padding: 4px; }
+QTableWidget { background: #111827; alternate-background-color: #141d2c; color: #e6eaf3; border: 1px solid #253148; border-radius: 10px; gridline-color: transparent; selection-background-color: #302b55; selection-color: #ffffff; outline: 0; }
+QHeaderView::section { background: #151f30; color: #9ca9bf; border: none; border-bottom: 1px solid #2a3850; padding: 13px 10px; font-size: 10px; font-weight: 800; letter-spacing: 0.8px; }
+QTableWidget::item { padding: 9px; border-bottom: 1px solid #202c40; }
+QTableWidget::item:selected { background: #302b55; color: #ffffff; }
 QListWidget { background: transparent; border: none; outline: none; }
-QListWidget::item { padding: 9px 4px; border-bottom: 1px solid #202735; }
+QListWidget::item { padding: 10px 6px; border-bottom: 1px solid #202b3d; border-radius: 6px; }
+QListWidget::item:hover { background: #172033; }
 QScrollArea { border: none; background: transparent; }
-QScrollBar:vertical { background: #0b0e14; width: 9px; margin: 0; }
-QScrollBar::handle:vertical { background: #30394a; border-radius: 4px; min-height: 24px; }
+QScrollBar:vertical { background: #0b111c; width: 10px; margin: 2px; }
+QScrollBar::handle:vertical { background: #34425b; border-radius: 5px; min-height: 28px; }
+QScrollBar::handle:vertical:hover { background: #526484; }
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
+QToolTip { background: #182237; color: #f2f5fc; border: 1px solid #465775; padding: 6px 8px; border-radius: 6px; }
 """
 
 
 def error_message(exc: Exception) -> str:
+    """Convert transport, API and local failures into useful user-facing text."""
     if isinstance(exc, HTTPError):
-        try:
-            payload = json.loads(exc.read().decode("utf-8", errors="replace"))
-            detail = payload.get("detail") or payload.get("message")
-            if detail:
-                return f"API error {exc.code}: {detail}"
-        except (ValueError, AttributeError):
-            pass
-        if exc.code == 413:
-            return (
-                "The cloud host rejected this snapshot because the upload is too large "
-                "(HTTP 413). Update Oryn to the latest version and retry; the updated "
-                "client reduces oversized project payloads and reports any omitted files."
-            )
+        # HTTPError.read() is a one-shot stream. Read it once so a non-JSON
+        # gateway error can still be shown instead of disappearing silently.
         try:
             body = exc.read().decode("utf-8", errors="replace").strip()
-            if body and len(body) <= 500:
-                return f"API request failed (HTTP {exc.code}): {body}"
         except (OSError, AttributeError):
-            pass
-        return f"API request failed (HTTP {exc.code})."
+            body = ""
+        try:
+            payload = json.loads(body) if body else {}
+        except (ValueError, TypeError):
+            payload = {}
+        if isinstance(payload, dict):
+            detail = payload.get("detail") or payload.get("message")
+            if isinstance(detail, (str, int, float)) and str(detail).strip():
+                return f"API error {exc.code}: {str(detail).strip()}"
+        if exc.code == 413:
+            return (
+                "The server or hosting gateway rejected this request as too large "
+                "(HTTP 413). Oryn uploads large snapshots in verified chunks, but a "
+                "gateway can still reject a request if the deployed API is outdated. "
+                "Check the deployment and server logs; no complete snapshot was confirmed."
+            )
+        if exc.code == 401:
+            return "Your session has expired or the credentials were rejected. Sign in again."
+        if exc.code == 403:
+            return "The server denied this action. Check that this workspace belongs to your account."
+        if exc.code == 404:
+            return "Oryn could not find that workspace or snapshot. Refresh the list and try again."
+        if exc.code == 409:
+            return "The operation conflicts with the current upload or workspace state. Refresh and retry."
+        if body and len(body) <= 500:
+            return f"API request failed (HTTP {exc.code}): {body}"
+        return f"API request failed (HTTP {exc.code}). Check the API deployment logs for details."
     if isinstance(exc, URLError):
         reason = getattr(exc, "reason", None)
         if isinstance(reason, str) and reason:
-            return f"Could not reach Oryn Cloud: {reason}"
-        return "Could not reach Oryn Cloud. Check your connection and API URL."
-    return str(exc) or exc.__class__.__name__
+            return f"Could not reach Oryn Cloud: {reason}. Check your internet connection and API URL."
+        if reason is not None:
+            return f"Could not reach Oryn Cloud: {reason}. Check your internet connection and API URL."
+        return "Could not reach Oryn Cloud. Check your internet connection and API URL."
+    message = str(exc).strip()
+    if message:
+        return message
+    return f"{exc.__class__.__name__}: no additional details were provided."
 
 
 def show_message_dialog(parent, title: str, message: str, *, kind="info", details=None):
@@ -1600,7 +1626,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("Oryn · Workspace continuity")
         self.resize(1440, 920)
-        self.setMinimumSize(1050, 720)
+        self.setMinimumSize(900, 620)
         self._tasks = set()
         self.stack = QStackedWidget()
         self.setCentralWidget(self.stack)
