@@ -105,9 +105,18 @@ def test_chunked_upload_verifies_full_payload_and_finalize_is_idempotent(db_and_
     assert second["already_finalized"] is True
     saved = db.get(Snapshot, first["id"])
     assert saved.data["project"]["files"][0]["path"] == "hello.txt"
-    # CHANGED: Preserve the exact verified upload bytes for future downloads.
-    assert saved.raw_payload == raw
-    assert db.scalars(select(SnapshotUploadChunk)).all() == []
+    assert "data" not in saved.data["project"]["files"][0]
+    assert saved.raw_payload is None
+    assert saved.data["project_manifest"][0]["sha256"] == hashlib.sha256(b"hello").hexdigest()
+    # The original verified chunks are the durable payload store, not a
+    # temporary copy to be deleted after a large database write.
+    stored_chunks = db.scalars(select(SnapshotUploadChunk)).all()
+    assert len(stored_chunks) == 1
+    assert bytes(stored_chunks[0].data) == raw
+    manifest = snapshot_download_manifest(workspace.id, saved.id, db, user)
+    assert manifest["sha256"] == hashlib.sha256(raw).hexdigest()
+    downloaded = snapshot_download_chunk(workspace.id, saved.id, 0, db, user)
+    assert base64.b64decode(downloaded["data"]) == raw
 
 
 def test_incomplete_upload_cannot_create_a_snapshot(db_and_user):

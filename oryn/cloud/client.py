@@ -31,7 +31,7 @@ class CloudClient:
         # in a permanent loading state. Override for slower links with
         # ORYN_REQUEST_TIMEOUT (seconds).
         try:
-            self.timeout = max(5.0, float(os.getenv("ORYN_REQUEST_TIMEOUT", "30")))
+            self.timeout = max(5.0, float(os.getenv("ORYN_REQUEST_TIMEOUT", "90")))
         except ValueError:
             self.timeout = 30.0
 
