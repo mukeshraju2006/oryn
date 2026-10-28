@@ -381,7 +381,17 @@ class CloudClient:
                 f"{self.base_url}/workspaces/{workspace_id}"
                 f"/snapshots/{snapshot_id}"
             )
-            return migrate_snapshot_data(self._request(url))
+            payload = self._request(url)
+            if not isinstance(payload, dict):
+                raise ValueError("Downloaded snapshot is not a JSON object.")
+            raw = json.dumps(
+                payload, separators=(",", ":"), ensure_ascii=False,
+            ).encode("utf-8")
+            if len(raw) != total_bytes:
+                raise ValueError("Snapshot download byte count does not match the manifest.")
+            if not hmac.compare_digest(hashlib.sha256(raw).hexdigest(), digest):
+                raise ValueError("Snapshot download failed the full-payload checksum.")
+            return migrate_snapshot_data(payload)
 
         chunks = []
         for index in range(chunk_count):
