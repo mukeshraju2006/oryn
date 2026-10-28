@@ -1,6 +1,11 @@
 
 
 
+@pytest.fixture(scope="module")
+def qt_app():
+    return QApplication.instance() or QApplication([])
+
+
 def test_restore_preview_uses_metadata_before_fetching_snapshot(qt_app, monkeypatch):
     """Preview confirmation must happen before the full project download."""
     monkeypatch.setattr(DashboardView, "load_workspaces", lambda self: None)
