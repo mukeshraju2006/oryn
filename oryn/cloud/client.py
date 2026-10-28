@@ -201,6 +201,7 @@ class CloudClient:
         self,
         workspace_id,
         snapshot,
+        progress=None,
     ):
         payload = snapshot.to_dict()
         canonical = json.dumps(
@@ -251,11 +252,27 @@ class CloudClient:
                 }).encode("utf-8"),
                 method="POST",
             )
-            upload_id = session["upload_id"]
-            chunk_bytes = int(session.get("chunk_bytes", chunk_bytes))
+            upload_id = session.get("upload_id")
+            server_chunk_bytes = session.get("chunk_bytes")
+            if (
+                not isinstance(upload_id, str) or not upload_id
+                or isinstance(server_chunk_bytes, bool)
+                or not isinstance(server_chunk_bytes, int)
+                or server_chunk_bytes != chunk_bytes
+                or session.get("chunk_count") != chunk_count
+                or session.get("total_bytes") != len(raw_data)
+            ):
+                raise RuntimeError(
+                    "The server returned an invalid snapshot upload session. "
+                    "No snapshot was finalized; update the desktop and cloud API together."
+                )
             request_count = 1
             try:
                 for index, offset in enumerate(range(0, len(raw_data), chunk_bytes)):
+                    if progress is not None:
+                        progress(
+                            f"Uploading verified snapshot chunk {index + 1} of {chunk_count}…"
+                        )
                     chunk = raw_data[offset:offset + chunk_bytes]
                     chunk_digest = hashlib.sha256(chunk).hexdigest()
                     chunk_payload = json.dumps({
@@ -299,6 +316,8 @@ class CloudClient:
 
             # CHANGED: Finalize is safe to retry because the server retains an
             # idempotent receipt even if the first response was lost.
+            if progress is not None:
+                progress("Verifying every uploaded chunk and publishing snapshot…")
             finalize_url = (
                 f"{self.base_url}/workspaces/{workspace_id}"
                 f"/snapshot-uploads/{upload_id}/finalize"
