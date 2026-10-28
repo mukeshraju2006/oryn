@@ -1436,14 +1436,40 @@ class DashboardView(QWidget):
             (item for item in self.snapshots if item.get("id") == snapshot_id),
             {"id": snapshot_id, "snapshot_number": snapshot_id},
         )
-        self._restore_preview(metadata, snapshot_id, workspace_id)
+        self._task(
+            lambda progress: self._load_restore_preview(
+                workspace_id, snapshot_id, progress
+            ),
+            lambda payload: self._restore_preview(payload, snapshot_id, workspace_id),
+            "Comparing local workspace with cloud snapshot…",
+            on_progress=self._log,
+        )
+
+    def _load_restore_preview(self, workspace_id, snapshot_id, progress=None):
+        # CHANGED: Do disk hashing in the worker thread, never in the GUI thread.
+        payload = self.client.get_restore_payload(
+            workspace_id, snapshot_id, progress=progress
+        )
+        source_path = (payload.get("workspace") or {}).get("path")
+        adapter = VSCodeAdapter()
+        destination = (
+            adapter.map_workspace_to_current_home(source_path)
+            if source_path and payload.get("application") == "vscode"
+            else None
+        )
+        payload["_client_local_comparison"] = (
+            adapter.compare_project_manifest(destination, payload.get("project_manifest") or [])
+            if destination and payload.get("application") == "vscode"
+            else {"exists": False, "matches": False, "changed": [], "missing": []}
+        )
+        return payload
 
     def _restore_preview(self, snapshot, snapshot_id, workspace_id):
         if not isinstance(snapshot, dict) or not snapshot:
             show_error_dialog(self, "The selected snapshot could not be found.")
             return
         number = snapshot.get("snapshot_number", snapshot_id)
-        workspace = {"path": snapshot.get("project_path")}
+        workspace = snapshot.get("workspace") or {"path": snapshot.get("project_path")}
         files = [None] * int(snapshot.get("file_count") or 0)
         urls = [None] * int(snapshot.get("browser_url_count") or 0)
         project = {}
@@ -1459,6 +1485,13 @@ class DashboardView(QWidget):
             else "will be recreated if project data is available" if destination
             else "not available"
         )
+        manifest = snapshot.get("project_manifest") or []
+        comparison = snapshot.get("_client_local_comparison") or (
+            VSCodeAdapter().compare_project_manifest(destination, manifest)
+            if destination and snapshot.get("application") == "vscode"
+            else {"exists": False, "matches": False, "changed": [], "missing": []}
+        )
+        needs_full_download = not comparison.get("exists") or not comparison.get("matches")
         app_type = snapshot.get("application")
         vscode_command = (
             VSCodeAdapter().platform.code_executable()
@@ -1476,8 +1509,16 @@ class DashboardView(QWidget):
             f"Original project path: {source_path or 'Not recorded'}",
             f"Restore destination: {destination_text} ({destination_state})",
             f"Editor files: {len(files)}",
-            "Project file inventory: checked after download",
-            "Project file exclusions: checked after download",
+            f"Cloud project files in manifest: {len(manifest)}",
+            (
+                "Local project matches the snapshot; project contents will not be downloaded."
+                if comparison.get("matches")
+                else f"Local project differs: {len(comparison.get('changed', []))} changed and "
+                     f"{len(comparison.get('missing', []))} missing snapshot file(s)."
+                     if comparison.get("exists")
+                     else "Local project is missing; project contents must be downloaded for recovery."
+            ),
+            "Local files not present in the snapshot will be left untouched.",
             f"Browser tabs to open: {len(urls)}",
             f"Active file: {snapshot.get('active_file') or 'Not recorded'}",
             "",
@@ -1493,6 +1534,13 @@ class DashboardView(QWidget):
         # CHANGED: Fetch and verify the payload only after confirmation. The
         # download runs in a worker thread and reports progress instead of
         # leaving the user staring at a preview spinner with no explanation.
+        if not needs_full_download:
+            # CHANGED: Restore editor/session state directly from the reduced
+            # verified response. No project file bodies cross the network.
+            self._restore_snapshot_data(snapshot, snapshot_id, workspace_id)
+            return
+
+        # Download full contents only when the local project is missing or differs.
         self._task(
             lambda progress: self.client.get_snapshot(
                 workspace_id, snapshot_id, progress=progress
@@ -1500,7 +1548,7 @@ class DashboardView(QWidget):
             lambda full_snapshot: self._restore_snapshot_data(
                 full_snapshot, snapshot_id, workspace_id
             ),
-            "Downloading and validating snapshot…",
+            "Downloading changed project snapshot and validating…",
             on_progress=self._log,
         )
 

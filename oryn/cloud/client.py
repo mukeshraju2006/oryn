@@ -216,15 +216,10 @@ class CloudClient:
         ).encode("utf-8")
 
         url = f"{self.base_url}/workspaces/{workspace_id}/snapshots"
-        # Use the escaped JSON size as a conservative estimate because the API
-        # validates JSON after parsing and some gateways count encoded bytes.
-        conservative_size = len(json.dumps(
-            payload, separators=(",", ":"), ensure_ascii=True,
-        ).encode("utf-8"))
-        if (
-            len(raw_data) <= MAX_SNAPSHOT_REQUEST_BYTES
-            and conservative_size <= MAX_SNAPSHOT_REQUEST_BYTES
-        ):
+        # CHANGED: Avoid a third full JSON serialization just to estimate
+        # escaped size. Snapshot file bodies are base64 ASCII; a 20% margin
+        # leaves room for Unicode-heavy metadata without another huge allocation.
+        if len(raw_data) <= int(MAX_SNAPSHOT_REQUEST_BYTES * 0.8):
             result = self._request(url, data=raw_data, method="POST")
             request_count = 1
             upload_mode = "single-request"
@@ -232,7 +227,7 @@ class CloudClient:
             # CHANGED: Split bytes, not JSON objects, so Unicode and base64
             # file content survive exactly. The server verifies every chunk
             # and the complete payload before making a snapshot visible.
-            chunk_bytes = 512 * 1024
+            chunk_bytes = 2 * 1024 * 1024  # CHANGED: fewer round trips for large snapshots
             upload_id = None
             chunk_count = (len(raw_data) + chunk_bytes - 1) // chunk_bytes
             if len(raw_data) > 256 * 1024 * 1024:
@@ -363,6 +358,29 @@ class CloudClient:
                 "verified_bytes": len(raw_data),
             }
         return result
+
+    # CHANGED: Fetch editor state and a project hash manifest without transferring
+    # every project file. Existing local projects can be checked before payload download.
+    def get_restore_payload(self, workspace_id, snapshot_id, progress=None):
+        from oryn.core.snapshot import migrate_snapshot_data
+
+        if progress is not None:
+            progress("Checking cloud snapshot and project manifest…")
+        url = (
+            f"{self.base_url}/workspaces/{workspace_id}"
+            f"/snapshots/{snapshot_id}/restore-payload"
+        )
+        payload = self._request(url)
+        if not isinstance(payload, dict):
+            raise ValueError("Restore preview payload is not a JSON object.")
+        manifest = payload.get("project_manifest", [])
+        if not isinstance(manifest, list):
+            raise ValueError("Restore preview returned an invalid project manifest.")
+        # The server verifies the original integrity digest before removing file
+        # contents. The reduced response is intentionally a different document.
+        reduced = migrate_snapshot_data(payload)
+        reduced["project_manifest"] = manifest
+        return reduced
 
     # CHANGED:
     # Retrieve authenticated snapshot.

@@ -14,8 +14,8 @@ def qt_app():
     return QApplication.instance() or QApplication([])
 
 
-def test_restore_preview_uses_metadata_before_fetching_snapshot(qt_app, monkeypatch):
-    """Preview confirmation must happen before the full project download."""
+def test_restore_starts_with_local_manifest_comparison(qt_app, monkeypatch):
+    """The first restore request fetches a lightweight manifest, not the full payload."""
     monkeypatch.setattr(DashboardView, "load_workspaces", lambda self: None)
 
     class DummyClient:
@@ -41,7 +41,7 @@ def test_restore_preview_uses_metadata_before_fetching_snapshot(qt_app, monkeypa
 
     view.restore_snapshot(snapshot_id=101, workspace_id=17)
 
-    assert captured["activity"] == "Downloading and validating snapshot…"
+    assert captured["activity"] == "Comparing local workspace with cloud snapshot…"
     assert captured["kwargs"]["on_progress"] is not None
     # The callback is deferred; previewing metadata does not call get_snapshot.
     assert callable(captured["function"])

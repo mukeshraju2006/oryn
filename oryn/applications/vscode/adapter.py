@@ -1,6 +1,7 @@
 import base64
 import csv
 import fnmatch
+import hashlib
 import json
 import os
 import re
@@ -1132,6 +1133,8 @@ class VSCodeAdapter:
                             "size": len(
                                 raw_data
                             ),
+                            # CHANGED: Reuse the capture-time hash for future local/cloud comparisons.
+                            "sha256": hashlib.sha256(raw_data).hexdigest(),
                             "encoding": "base64",
                         }
                     )
@@ -1497,12 +1500,58 @@ class VSCodeAdapter:
 
         return target
 
+    # CHANGED: Compare only files represented in the cloud snapshot manifest.
+    # Files outside the manifest are left untouched rather than deleted.
+    def compare_project_manifest(self, workspace_path, manifest):
+        root = Path(workspace_path) if workspace_path else None
+        if root is None or not root.is_dir():
+            return {"exists": False, "matches": False, "changed": [], "missing": []}
+
+        changed = []
+        missing = []
+        for item in manifest or []:
+            if not isinstance(item, dict) or not isinstance(item.get("path"), str):
+                continue
+            target = self._safe_relative_destination(root, item["path"])
+            if target is None:
+                changed.append(item["path"])
+                continue
+            if not target.is_file():
+                missing.append(item["path"])
+                continue
+            expected_size = item.get("size")
+            expected_digest = item.get("sha256")
+            try:
+                stat = target.stat()
+                if isinstance(expected_size, int) and stat.st_size != expected_size:
+                    changed.append(item["path"])
+                    continue
+                if isinstance(expected_digest, str):
+                    digest = hashlib.sha256()
+                    with target.open("rb") as stream:
+                        for block in iter(lambda: stream.read(1024 * 1024), b""):
+                            digest.update(block)
+                    if digest.hexdigest() != expected_digest:
+                        changed.append(item["path"])
+                elif not isinstance(expected_size, int):
+                    changed.append(item["path"])
+            except OSError:
+                changed.append(item["path"])
+
+        return {
+            "exists": True,
+            "matches": not changed and not missing,
+            "changed": changed,
+            "missing": missing,
+        }
+
     # CHANGED:
     # Recreate a missing project from the cloud snapshot.
     def restore_project(
         self,
         project,
         destination_workspace,
+        overwrite_existing=False,
     ):
         requested_destination = Path(
             destination_workspace
@@ -1622,13 +1671,22 @@ class VSCodeAdapter:
                             f"Refusing to overwrite non-file target: {target}"
                         )
                         return False
-                    if target.read_bytes() != raw_data:
+                    existing_data = target.read_bytes()
+                    if existing_data == raw_data:
+                        continue
+                    if not overwrite_existing:
                         print(
                             f"Refusing to overwrite existing file with different "
                             f"content: {target}"
                         )
                         return False
-                    continue
+                    # CHANGED: Keep a recoverable copy before replacing local edits.
+                    backup_path = target.with_name(target.name + ".oryn-backup")
+                    if backup_path.exists():
+                        backup_path = target.with_name(
+                            target.name + f".oryn-backup-{int(time.time())}"
+                        )
+                    backup_path.write_bytes(existing_data)
 
                 target.write_bytes(
                     raw_data
@@ -2501,8 +2559,19 @@ class VSCodeAdapter:
 
             print(
                 "Destination project already exists. "
-                "Using the existing project."
+                "Comparing it with the selected snapshot."
             )
+            project = snapshot_data.get("project")
+            project_files = project.get("files", []) if isinstance(project, dict) else []
+            if any(isinstance(item, dict) and "data" in item for item in project_files):
+                print("Applying changed snapshot files; existing files are backed up before replacement.")
+                if not self.restore_project(
+                    project,
+                    destination_workspace,
+                    overwrite_existing=True,
+                ):
+                    print("Could not safely synchronize project files from snapshot.")
+                    return False
 
         else:
             project = snapshot_data.get(

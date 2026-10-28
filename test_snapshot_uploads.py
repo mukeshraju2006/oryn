@@ -24,6 +24,7 @@ from server.app.routes.snapshot_uploads import (
     put_snapshot_chunk,
     snapshot_download_manifest,
     snapshot_download_chunk,
+    snapshot_restore_payload,
 )
 
 
@@ -141,8 +142,8 @@ def test_large_snapshot_download_manifest_and_chunks_are_checksummed(db_and_user
             "directories": [],
             "files": [{
                 "path": "large.bin",
-                "data": "z" * (600_000),
-                "size": 600_000,
+                "data": "z" * (3_000_000),
+                "size": 3_000_000,
                 "encoding": "base64",
             }],
         },
@@ -184,3 +185,33 @@ def test_snapshot_download_is_scoped_to_workspace_owner(db_and_user):
     with pytest.raises(HTTPException) as error:
         snapshot_download_manifest(workspace.id, snapshot.id, db, stranger)
     assert error.value.status_code == 404
+
+
+def test_restore_payload_returns_hash_manifest_without_file_bodies(db_and_user):
+    db, user, workspace = db_and_user
+    payload = {
+        "version": 5,
+        "application": "vscode",
+        "workspace": {"path": "/tmp/project"},
+        "files": [],
+        "browser_urls": [],
+        "project": {
+            "root": ".",
+            "directories": [],
+            "files": [{"path": "hello.txt", "data": "aGVsbG8=", "size": 5, "encoding": "base64"}],
+        },
+    }
+    snapshot = Snapshot(workspace_id=workspace.id, version=5, data=payload)
+    db.add(snapshot)
+    db.commit()
+    db.refresh(snapshot)
+
+    reduced = snapshot_restore_payload(workspace.id, snapshot.id, db, user)
+
+    assert reduced["project_manifest"] == [{
+        "path": "hello.txt",
+        "size": 5,
+        "sha256": hashlib.sha256(b"hello").hexdigest(),
+    }]
+    assert "data" not in reduced["project"]["files"][0]
+    assert reduced["workspace"]["path"] == "/tmp/project"

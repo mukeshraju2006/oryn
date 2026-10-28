@@ -127,7 +127,7 @@ def test_large_snapshot_uploads_every_project_file_in_verified_chunks(monkeypatc
         if url.endswith("/snapshot-uploads") and method == "POST":
             manifest = json.loads(data.decode("utf-8"))
             captured["manifest"] = manifest
-            return {"upload_id": "upload-test", "chunk_bytes": 512 * 1024, "chunk_count": manifest["chunk_count"], "total_bytes": manifest["total_bytes"]}
+            return {"upload_id": "upload-test", "chunk_bytes": 2 * 1024 * 1024, "chunk_count": manifest["chunk_count"], "total_bytes": manifest["total_bytes"]}
         if "/chunks/" in url and method == "PUT":
             index = int(url.rsplit("/", 1)[1])
             item = json.loads(data.decode("utf-8"))
@@ -149,7 +149,7 @@ def test_large_snapshot_uploads_every_project_file_in_verified_chunks(monkeypatc
     assert result["_client_capture"]["upload_mode"] == "verified-chunked"
     assert result["_client_capture"]["omitted_project_files"] == []
     assert result["_client_capture"]["project_files_included"] == 1
-    assert all(size < 800 * 1024 for _, _, size in captured["requests"])
+    assert all(size < 3.5 * 1024 * 1024 for _, _, size in captured["requests"])
     reconstructed = b"".join(captured["chunks"][i] for i in range(len(captured["chunks"])))
     assert len(reconstructed) == captured["manifest"]["total_bytes"]
     assert hashlib.sha256(reconstructed).hexdigest() == captured["manifest"]["sha256"]
@@ -182,7 +182,7 @@ def test_large_snapshot_download_uses_verified_chunks(monkeypatch):
         },
     }
     raw = json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
-    chunk_bytes = 512 * 1024
+    chunk_bytes = 2 * 1024 * 1024
     chunk_count = math.ceil(len(raw) / chunk_bytes)
     calls = []
     progress_messages = []
@@ -233,7 +233,7 @@ def test_small_snapshot_download_is_verified_against_manifest(monkeypatch):
         if url.endswith("/download-manifest"):
             return {
                 "total_bytes": len(raw),
-                "chunk_bytes": 512 * 1024,
+                "chunk_bytes": 2 * 1024 * 1024,
                 "chunk_count": 1,
                 "sha256": hashlib.sha256(raw).hexdigest(),
             }
@@ -259,7 +259,7 @@ def test_small_snapshot_download_rejects_checksum_mismatch(monkeypatch):
         if url.endswith("/download-manifest"):
             return {
                 "total_bytes": 999,
-                "chunk_bytes": 512 * 1024,
+                "chunk_bytes": 2 * 1024 * 1024,
                 "chunk_count": 1,
                 "sha256": "0" * 64,
             }
@@ -270,3 +270,28 @@ def test_small_snapshot_download_rejects_checksum_mismatch(monkeypatch):
     monkeypatch.setattr(client, "_request", fake_request)
     with pytest.raises(ValueError, match="byte count does not match"):
         client.get_snapshot(7, 42)
+
+
+def test_restore_payload_uses_manifest_without_project_bodies(monkeypatch):
+    client = CloudClient(base_url="https://example.invalid")
+    calls = []
+    reduced = {
+        "version": 5,
+        "application": "vscode",
+        "workspace": {"path": "/tmp/project"},
+        "files": [],
+        "browser_urls": [],
+        "project": {"root": ".", "directories": [], "files": [{"path": "main.py", "size": 12}]},
+        "project_manifest": [{"path": "main.py", "size": 12, "sha256": "a" * 64}],
+    }
+
+    def fake_request(url, data=None, method="GET", content_encoding=None):
+        calls.append(url)
+        return reduced
+
+    monkeypatch.setattr(client, "_request", fake_request)
+    result = client.get_restore_payload(7, 42)
+
+    assert calls == ["https://example.invalid/workspaces/7/snapshots/42/restore-payload"]
+    assert result["project_manifest"][0]["path"] == "main.py"
+    assert "data" not in result["project"]["files"][0]
