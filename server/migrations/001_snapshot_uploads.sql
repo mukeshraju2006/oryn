@@ -2,12 +2,12 @@
 -- chunked-upload backend. Existing snapshots are unchanged.
 CREATE TABLE IF NOT EXISTS snapshot_uploads (
     id VARCHAR(36) PRIMARY KEY,
-    workspace_id INTEGER NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
-    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    workspace_id BIGINT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+    user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     chunk_count INTEGER NOT NULL CHECK (chunk_count > 0),
     total_bytes INTEGER NOT NULL CHECK (total_bytes > 0),
     sha256 VARCHAR(64) NOT NULL,
-    snapshot_id INTEGER REFERENCES snapshots(id) ON DELETE SET NULL,
+    snapshot_id BIGINT REFERENCES snapshots(id) ON DELETE SET NULL,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 ALTER TABLE snapshot_uploads
