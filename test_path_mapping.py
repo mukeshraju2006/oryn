@@ -463,5 +463,106 @@ class RestoreSafetyTests(unittest.TestCase):
         self.assertFalse((self.root.parent / "outside-two.txt").exists())
 
 
+class EditorSessionRestoreTests(unittest.TestCase):
+
+    def setUp(self):
+        self.adapter = VSCodeAdapter()
+        self.temporary_directory = tempfile.TemporaryDirectory()
+        self.root = Path(self.temporary_directory.name)
+        self.first_file = self.root / "first file.py"
+        self.active_file = self.root / "active.py"
+        self.first_file.write_text("first\\n" * 30)
+        self.active_file.write_text("active\\n" * 30)
+
+    def tearDown(self):
+        self.temporary_directory.cleanup()
+
+    def test_restore_open_editors_reopens_tabs_and_restores_cursor_positions(self):
+        snapshot = {
+            "active_file": str(self.active_file),
+            "files": [
+                {
+                    "path": str(self.first_file),
+                    "active": False,
+                    "cursor": {"line": 8, "column": 4},
+                },
+                {
+                    "path": str(self.active_file),
+                    "active": True,
+                    "cursor": {"line": 17, "column": 6},
+                },
+            ],
+        }
+        completed = subprocess.CompletedProcess(["code"], 0, "", "")
+
+        with patch.object(self.adapter, "_code_executable", return_value="/usr/bin/code"), \
+             patch("oryn.applications.vscode.adapter.subprocess.run", return_value=completed) as run:
+            self.assertTrue(
+                self.adapter.restore_open_editors(str(self.root), snapshot)
+            )
+
+        calls = [call.args[0] for call in run.call_args_list]
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(
+            calls[0],
+            ["/usr/bin/code", "--reuse-window", "--goto", f"{self.first_file}:8:4"],
+        )
+        self.assertEqual(
+            calls[1],
+            ["/usr/bin/code", "--reuse-window", "--goto", f"{self.active_file}:17:6"],
+        )
+
+    def test_restore_open_editors_deduplicates_files_and_prefers_active_group_cursor(self):
+        snapshot = {
+            "active_file": str(self.first_file),
+            "files": [
+                {
+                    "path": str(self.first_file),
+                    "active": False,
+                    "group": 0,
+                    "cursor": {"line": 3, "column": 2},
+                },
+                {
+                    "path": str(self.first_file),
+                    "active": True,
+                    "group": 1,
+                    "cursor": {"line": 12, "column": 9},
+                },
+                {
+                    "path": str(self.active_file),
+                    "active": False,
+                    "cursor": {},
+                },
+            ],
+        }
+        completed = subprocess.CompletedProcess(["code"], 0, "", "")
+
+        with patch.object(self.adapter, "_code_executable", return_value="/usr/bin/code"), \
+             patch("oryn.applications.vscode.adapter.subprocess.run", return_value=completed) as run:
+            self.assertTrue(
+                self.adapter.restore_open_editors(str(self.root), snapshot)
+            )
+
+        calls = [call.args[0] for call in run.call_args_list]
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(calls[0][-1], f"{self.active_file}:1:1")
+        self.assertEqual(calls[1][-1], f"{self.first_file}:12:9")
+
+    def test_restore_open_editors_reports_cli_failure(self):
+        snapshot = {
+            "active_file": str(self.active_file),
+            "files": [
+                {"path": str(self.active_file), "active": True, "cursor": {}},
+            ],
+        }
+        failed = subprocess.CompletedProcess(["code"], 1, "", "failed")
+
+        with patch.object(self.adapter, "_code_executable", return_value="/usr/bin/code"), \
+             patch("oryn.applications.vscode.adapter.subprocess.run", return_value=failed):
+            self.assertFalse(
+                self.adapter.restore_open_editors(str(self.root), snapshot)
+            )
+
+
 if __name__ == "__main__":
     unittest.main()
