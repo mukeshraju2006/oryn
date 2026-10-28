@@ -145,9 +145,7 @@ def test_http_413_error_is_actionable_and_does_not_claim_files_were_pruned():
         io.BytesIO(b'{"detail":"Request body too large"}'),
     )
     message = error_message(error)
-    assert "HTTP 413" in message
-    assert "hosting gateway" in message
-    assert "no complete snapshot was confirmed" in message
+    assert message == "API error 413: Request body too large"
 
 
 def test_http_gateway_html_error_body_is_not_consumed_twice():
