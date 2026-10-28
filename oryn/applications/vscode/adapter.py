@@ -1004,6 +1004,13 @@ class VSCodeAdapter:
 
         project_files = []
         directories = []
+        omitted_files = []
+        exclusion_reasons = {}
+
+        def record_exclusion(relative_path, reason):
+            relative_path = str(relative_path).replace("\\\\", "/")
+            omitted_files.append(relative_path)
+            exclusion_reasons[relative_path] = reason
 
         if not workspace.exists() or not workspace.is_dir():
             raise FileNotFoundError(
@@ -1032,15 +1039,23 @@ class VSCodeAdapter:
                 current_root
             )
 
-            directory_names[:] = sorted(
-                name
-                for name in directory_names
-                if (
-                    name not in excluded_directories
-                    and not name.startswith(".venv")
-                    and not (current_path / name).is_symlink()
-                )
-            )
+            retained_directories = []
+            for name in sorted(directory_names):
+                directory_path = current_path / name
+                if name in excluded_directories or name.startswith(".venv"):
+                    record_exclusion(
+                        directory_path.relative_to(workspace).as_posix() + "/",
+                        "dependency/cache/build directory excluded by capture policy",
+                    )
+                    continue
+                if directory_path.is_symlink():
+                    record_exclusion(
+                        directory_path.relative_to(workspace).as_posix(),
+                        "symbolic link excluded for path-safety",
+                    )
+                    continue
+                retained_directories.append(name)
+            directory_names[:] = retained_directories
 
             for directory_name in directory_names:
                 directory_path = (
@@ -1067,17 +1082,20 @@ class VSCodeAdapter:
                     progress(f"Scanning project files… {scanned_files} checked")
                 # Exclude secrets even if they are inside the project tree;
                 # .gitignore is not consulted by this filesystem walk.
+                file_path = current_path / file_name
+                relative_hint = file_path.relative_to(workspace).as_posix()
                 if is_sensitive_file(file_name):
+                    record_exclusion(
+                        relative_hint,
+                        "credential/private-key pattern excluded by capture policy",
+                    )
                     continue
 
-                file_path = (
-                    current_path / file_name
-                )
-
-                if (
-                    file_path.is_symlink()
-                    or not file_path.is_file()
-                ):
+                if file_path.is_symlink():
+                    record_exclusion(relative_hint, "symbolic link excluded for path-safety")
+                    continue
+                if not file_path.is_file():
+                    record_exclusion(relative_hint, "not a regular file")
                     continue
 
                 try:
@@ -1129,15 +1147,15 @@ class VSCodeAdapter:
 
         return {
             "root": ".",
-            "directories": sorted(
-                directories
-            ),
-            "files": sorted(
-                project_files,
-                key=lambda item: item[
-                    "path"
-                ],
-            ),
+            "directories": sorted(directories),
+            "files": sorted(project_files, key=lambda item: item["path"]),
+            # CHANGED: Be explicit about policy exclusions so the UI can
+            # distinguish intentional omissions from a complete file capture.
+            "omitted_files": sorted(set(omitted_files)),
+            "exclusion_reasons": {
+                path: exclusion_reasons[path]
+                for path in sorted(exclusion_reasons)
+            },
         }
 
     # CHANGED:
