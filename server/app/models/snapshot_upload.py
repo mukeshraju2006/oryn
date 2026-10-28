@@ -5,7 +5,7 @@ not visible as a snapshot until the final payload is verified and committed.
 """
 from datetime import datetime, timezone
 
-from sqlalchemy import DateTime, ForeignKey, Integer, LargeBinary, String, UniqueConstraint
+from sqlalchemy import BigInteger, DateTime, ForeignKey, Integer, LargeBinary, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from server.app.database import Base
@@ -16,17 +16,17 @@ class SnapshotUpload(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
     workspace_id: Mapped[int] = mapped_column(
-        ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False, index=True
+        BigInteger, ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False, index=True
     )
     user_id: Mapped[int] = mapped_column(
-        ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+        BigInteger, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
     chunk_count: Mapped[int] = mapped_column(Integer, nullable=False)
     total_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
     sha256: Mapped[str] = mapped_column(String(64), nullable=False)
     # CHANGED: Keep a completion receipt so a lost finalize response is safe to retry.
     snapshot_id: Mapped[int | None] = mapped_column(
-        ForeignKey("snapshots.id", ondelete="SET NULL"), nullable=True
+        BigInteger, ForeignKey("snapshots.id", ondelete="SET NULL"), nullable=True
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime,
