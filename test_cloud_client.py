@@ -127,7 +127,7 @@ def test_large_snapshot_uploads_every_project_file_in_verified_chunks(monkeypatc
         if url.endswith("/snapshot-uploads") and method == "POST":
             manifest = json.loads(data.decode("utf-8"))
             captured["manifest"] = manifest
-            return {"upload_id": "upload-test", "chunk_bytes": 512 * 1024}
+            return {"upload_id": "upload-test", "chunk_bytes": 512 * 1024, "chunk_count": manifest["chunk_count"], "total_bytes": manifest["total_bytes"]}
         if "/chunks/" in url and method == "PUT":
             index = int(url.rsplit("/", 1)[1])
             item = json.loads(data.decode("utf-8"))
