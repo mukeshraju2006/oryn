@@ -133,3 +133,49 @@ def test_message_dialog_shows_body_and_close_action(qt_app):
 
     QTimer.singleShot(0, inspect_dialog)
     show_message_dialog(None, "Test dialog", "A readable message")
+
+
+
+def test_http_413_error_is_actionable_and_does_not_claim_files_were_pruned():
+    error = HTTPError(
+        "https://example.invalid/snapshots",
+        413,
+        "Payload Too Large",
+        {},
+        io.BytesIO(b'{"detail":"Request body too large"}'),
+    )
+    message = error_message(error)
+    assert message == "API error 413: Request body too large"
+
+
+def test_http_gateway_html_error_body_is_not_consumed_twice():
+    error = HTTPError(
+        "https://example.invalid/snapshots",
+        502,
+        "Bad Gateway",
+        {},
+        io.BytesIO(b"<html>upstream unavailable</html>"),
+    )
+    assert error_message(error) == (
+        "API request failed (HTTP 502): <html>upstream unavailable</html>"
+    )
+
+
+def test_http_401_error_explains_reauthentication():
+    error = HTTPError(
+        "https://example.invalid/auth/login",
+        401,
+        "Unauthorized",
+        {},
+        io.BytesIO(b'{"message":"token expired"}'),
+    )
+    assert error_message(error) == "API error 401: token expired"
+
+
+def test_desktop_theme_has_clear_focus_and_disabled_states():
+    from gui.qt_app import APP_STYLE
+
+    assert "QLineEdit:focus" in APP_STYLE
+    assert "QPushButton:disabled" in APP_STYLE
+    assert "QPushButton#primary" in APP_STYLE
+    assert "QToolTip" in APP_STYLE

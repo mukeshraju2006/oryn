@@ -1,5 +1,7 @@
 """Cloud client retry and timing regression tests."""
 
+import base64
+import hashlib
 import json
 from urllib.error import URLError
 
@@ -81,33 +83,24 @@ def test_snapshot_upload_adds_a_valid_integrity_checksum(monkeypatch):
                 "browser_urls": [],
             }
 
-    assert client.create_snapshot(3, SnapshotStub()) == {"id": 4}
+    result = client.create_snapshot(3, SnapshotStub())
+    assert result["id"] == 4
+    assert result["_client_capture"]["omitted_project_files"] == []
     assert captured["method"] == "POST"
     assert captured["payload"]["_integrity"]["algorithm"] == "sha256"
     assert migrate_snapshot_data(captured["payload"])["application"] == "vscode"
 
 
 
-def test_snapshot_upload_prunes_largest_project_file_to_fit_gateway_limit(monkeypatch):
+def test_large_snapshot_uploads_every_project_file_in_verified_chunks(monkeypatch):
     import base64
+    import hashlib
     import random
 
     client = CloudClient(base_url="https://example.invalid")
-    captured = {}
-
-    # Deterministic incompressible content simulates binary assets that gzip
-    # cannot shrink enough to pass the hosting request-body limit.
+    captured = {"chunks": {}, "requests": []}
     random_bytes = random.Random(42).randbytes(4_000_000)
     encoded = base64.b64encode(random_bytes).decode("ascii")
-
-    def fake_request(url, data=None, method="GET", content_encoding=None):
-        captured["request_bytes"] = len(data)
-        captured["payload"] = json.loads(data.decode("utf-8"))
-        captured["content_encoding"] = content_encoding
-        captured["method"] = method
-        return {"id": 9, "snapshot_number": 1}
-
-    monkeypatch.setattr(client, "_request", fake_request)
 
     class SnapshotStub:
         def to_dict(self):
@@ -120,18 +113,157 @@ def test_snapshot_upload_prunes_largest_project_file_to_fit_gateway_limit(monkey
                 "project": {
                     "root": ".",
                     "directories": [],
-                    "files": [{"path": "assets/large.bin", "data": encoded,
-                               "size": len(random_bytes), "encoding": "base64"}],
+                    "files": [{
+                        "path": "assets/large.bin",
+                        "data": encoded,
+                        "size": len(random_bytes),
+                        "encoding": "base64",
+                    }],
                 },
             }
 
+    def fake_request(url, data=None, method="GET", content_encoding=None):
+        captured["requests"].append((url, method, len(data or b"")))
+        if url.endswith("/snapshot-uploads") and method == "POST":
+            manifest = json.loads(data.decode("utf-8"))
+            captured["manifest"] = manifest
+            return {"upload_id": "upload-test", "chunk_bytes": 512 * 1024, "chunk_count": manifest["chunk_count"], "total_bytes": manifest["total_bytes"]}
+        if "/chunks/" in url and method == "PUT":
+            index = int(url.rsplit("/", 1)[1])
+            item = json.loads(data.decode("utf-8"))
+            chunk = base64.b64decode(item["data"])
+            assert hashlib.sha256(chunk).hexdigest() == item["sha256"]
+            captured["chunks"][index] = chunk
+            return {"uploaded": True}
+        if url.endswith("/finalize") and method == "POST":
+            return {"id": 9, "snapshot_number": 1, "verified": True}
+        if method == "DELETE":
+            return {"cancelled": True}
+        raise AssertionError(f"Unexpected request: {method} {url}")
+
+    monkeypatch.setattr(client, "_request", fake_request)
     result = client.create_snapshot(3, SnapshotStub())
+
     assert result["id"] == 9
-    assert captured["method"] == "POST"
-    from oryn.cloud.client import MAX_SNAPSHOT_REQUEST_BYTES
-    assert captured["request_bytes"] <= MAX_SNAPSHOT_REQUEST_BYTES
-    assert captured["content_encoding"] is None
-    assert captured["payload"]["project"]["files"] == []
-    assert captured["payload"]["project"]["omitted_files"] == ["assets/large.bin"]
-    assert result["_client_capture"]["omitted_project_files"] == ["assets/large.bin"]
-    assert migrate_snapshot_data(captured["payload"])["application"] == "vscode"
+    assert result["verified"] is True
+    assert result["_client_capture"]["upload_mode"] == "verified-chunked"
+    assert result["_client_capture"]["omitted_project_files"] == []
+    assert result["_client_capture"]["project_files_included"] == 1
+    assert all(size < 800 * 1024 for _, _, size in captured["requests"])
+    reconstructed = b"".join(captured["chunks"][i] for i in range(len(captured["chunks"])))
+    assert len(reconstructed) == captured["manifest"]["total_bytes"]
+    assert hashlib.sha256(reconstructed).hexdigest() == captured["manifest"]["sha256"]
+    payload = json.loads(reconstructed.decode("utf-8"))
+    assert payload["project"]["files"][0]["path"] == "assets/large.bin"
+    assert payload["project"]["files"][0]["data"] == encoded
+    assert "omitted_files" not in payload["project"]
+    assert migrate_snapshot_data(payload)["application"] == "vscode"
+
+
+def test_large_snapshot_download_uses_verified_chunks(monkeypatch):
+    import math
+
+    client = CloudClient(base_url="https://example.invalid")
+    payload = {
+        "version": 5,
+        "application": "vscode",
+        "workspace": {"path": "/tmp/project"},
+        "files": [],
+        "browser_urls": [],
+        "project": {
+            "root": ".",
+            "directories": [],
+            "files": [{
+                "path": "large.bin",
+                "data": "x" * (4 * 1024 * 1024),
+                "size": 4 * 1024 * 1024,
+                "encoding": "base64",
+            }],
+        },
+    }
+    raw = json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    chunk_bytes = 512 * 1024
+    chunk_count = math.ceil(len(raw) / chunk_bytes)
+    calls = []
+
+    def fake_request(url, data=None, method="GET", content_encoding=None):
+        calls.append(url)
+        if url.endswith("/download-manifest"):
+            return {
+                "snapshot_id": 42,
+                "total_bytes": len(raw),
+                "chunk_bytes": chunk_bytes,
+                "chunk_count": chunk_count,
+                "sha256": hashlib.sha256(raw).hexdigest(),
+            }
+        if "/download-chunks/" in url:
+            index = int(url.rsplit("/", 1)[1])
+            chunk = raw[index * chunk_bytes:(index + 1) * chunk_bytes]
+            return {
+                "snapshot_id": 42,
+                "chunk_index": index,
+                "sha256": hashlib.sha256(chunk).hexdigest(),
+                "data": base64.b64encode(chunk).decode("ascii"),
+            }
+        raise AssertionError(f"Unexpected request: {url}")
+
+    monkeypatch.setattr(client, "_request", fake_request)
+    result = client.get_snapshot(7, 42)
+
+    assert result["project"]["files"][0]["path"] == "large.bin"
+    assert len(calls) == chunk_count + 1
+    assert all("/download-chunks/" in url for url in calls[1:])
+
+
+def test_small_snapshot_download_is_verified_against_manifest(monkeypatch):
+    client = CloudClient(base_url="https://example.invalid")
+    payload = {
+        "version": 5,
+        "application": "vscode",
+        "workspace": {"path": "/tmp/project"},
+        "files": [],
+        "browser_urls": [],
+    }
+    raw = json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+
+    def fake_request(url, data=None, method="GET", content_encoding=None):
+        if url.endswith("/download-manifest"):
+            return {
+                "total_bytes": len(raw),
+                "chunk_bytes": 512 * 1024,
+                "chunk_count": 1,
+                "sha256": hashlib.sha256(raw).hexdigest(),
+            }
+        if url.endswith("/snapshots/42"):
+            return payload
+        raise AssertionError(f"Unexpected request: {url}")
+
+    monkeypatch.setattr(client, "_request", fake_request)
+    assert client.get_snapshot(7, 42)["application"] == "vscode"
+
+
+def test_small_snapshot_download_rejects_checksum_mismatch(monkeypatch):
+    client = CloudClient(base_url="https://example.invalid")
+    payload = {
+        "version": 5,
+        "application": "vscode",
+        "workspace": {"path": "/tmp/project"},
+        "files": [],
+        "browser_urls": [],
+    }
+
+    def fake_request(url, data=None, method="GET", content_encoding=None):
+        if url.endswith("/download-manifest"):
+            return {
+                "total_bytes": 999,
+                "chunk_bytes": 512 * 1024,
+                "chunk_count": 1,
+                "sha256": "0" * 64,
+            }
+        if url.endswith("/snapshots/42"):
+            return payload
+        raise AssertionError(f"Unexpected request: {url}")
+
+    monkeypatch.setattr(client, "_request", fake_request)
+    with pytest.raises(ValueError, match="byte count does not match"):
+        client.get_snapshot(7, 42)

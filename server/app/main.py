@@ -25,6 +25,9 @@ from server.app.routes.workspaces import (
 from server.app.routes.snapshots import (
     router as snapshot_router,
 )
+from server.app.routes.snapshot_uploads import (
+    router as snapshot_upload_router,
+)
 
 # CHANGED: Authentication router
 from server.app.routes.auth import (
@@ -110,6 +113,11 @@ app.include_router(
 
 app.include_router(
     snapshot_router
+)
+
+# CHANGED: Large snapshots upload in verified chunks to avoid gateway body limits.
+app.include_router(
+    snapshot_upload_router
 )
 
 # CHANGED: Register authentication routes

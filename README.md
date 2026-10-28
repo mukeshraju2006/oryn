@@ -265,7 +265,7 @@ For the current MVP, VS Code and Google Chrome are supported.
 
 Use **Capture workspace** in Oryn. The capture process reports its current stage, can be cancelled at safe checkpoints, and records timings for editor inspection, browser capture, and upload.
 
-Oryn collects the supported workspace information and uploads a snapshot to Oryn Cloud. Project files containing common credentials, private keys, dependency directories, and caches are excluded by the capture adapter.
+Oryn collects supported workspace information and uploads a snapshot to Oryn Cloud. Project files containing common credentials and private keys, plus dependency and cache directories, are intentionally excluded by the capture adapter. Upload transport never removes additional files to fit a request: snapshots larger than 3.5 MiB use 512 KiB chunks for both upload and download, and Oryn verifies each chunk plus the complete payload before publishing or restoring the snapshot. Intentional exclusions (credential/private-key patterns, dependency/cache/build directories, and symbolic links) are listed in the capture result with reasons; unreadable files or failed directory scans stop capture rather than being silently skipped. The current maximum serialized snapshot size is 256 MiB. If a capture exceeds that limit or any upload chunk fails verification, the snapshot is rejected instead of being saved partially. The chunked-upload tables must be created in production PostgreSQL by applying `server/migrations/001_snapshot_uploads.sql` before deploying this version.
 
 ## 4. Switch Devices
 
