@@ -38,6 +38,20 @@ def _owned_workspace(workspace_id: int, user: User, db: Session):
     return workspace
 
 
+def _snapshot_raw_payload(snapshot: Snapshot, db: Session) -> bytes:
+    """Return cached snapshot bytes, serializing legacy snapshots only once."""
+    raw = snapshot.raw_payload
+    if raw is None:
+        raw = json.dumps(
+            snapshot.data, separators=(",", ":"), ensure_ascii=False,
+        ).encode("utf-8")
+        # CHANGED: Backfill legacy snapshots on first access so later manifest
+        # and chunk requests do not repeatedly serialize the entire payload.
+        snapshot.raw_payload = raw
+        db.commit()
+    return bytes(raw)
+
+
 def _validate_snapshot(data: dict, expected_bytes: int):
     version = data.get("version", 1)
     if isinstance(version, bool) or not isinstance(version, int) or version < 1:
@@ -242,6 +256,7 @@ def finalize_snapshot_upload(
         workspace_id=workspace_id,
         version=snapshot_data.get("version", 1),
         data=snapshot_data,
+        raw_payload=raw,
     )
     db.add(snapshot)
     db.flush()
@@ -312,9 +327,7 @@ def snapshot_download_manifest(
     )
     if snapshot is None:
         raise HTTPException(status_code=404, detail="Snapshot not found.")
-    raw = json.dumps(
-        snapshot.data, separators=(",", ":"), ensure_ascii=False,
-    ).encode("utf-8")
+    raw = _snapshot_raw_payload(snapshot, db)
     if len(raw) > MAX_UPLOAD_BYTES:
         raise HTTPException(
             status_code=413,
