@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import DateTime, ForeignKey, Integer, JSON, LargeBinary
+from sqlalchemy import DateTime, ForeignKey, Integer, JSON
 from sqlalchemy.orm import Mapped, mapped_column
 
 from server.app.database import Base
@@ -29,14 +29,6 @@ class Snapshot(Base):
         JSON,
         nullable=False,
     )
-
-    # CHANGED: Cache the exact verified UTF-8 payload so chunk downloads do not
-    # repeatedly serialize the entire JSON snapshot for every requested chunk.
-    raw_payload: Mapped[bytes | None] = mapped_column(
-        LargeBinary,
-        nullable=True,
-    )
-
     created_at: Mapped[datetime] = mapped_column(
         DateTime,
         default=lambda: datetime.now(timezone.utc).replace(tzinfo=None),
