@@ -216,15 +216,10 @@ class CloudClient:
         ).encode("utf-8")
 
         url = f"{self.base_url}/workspaces/{workspace_id}/snapshots"
-        # Use the escaped JSON size as a conservative estimate because the API
-        # validates JSON after parsing and some gateways count encoded bytes.
-        conservative_size = len(json.dumps(
-            payload, separators=(",", ":"), ensure_ascii=True,
-        ).encode("utf-8"))
-        if (
-            len(raw_data) <= MAX_SNAPSHOT_REQUEST_BYTES
-            and conservative_size <= MAX_SNAPSHOT_REQUEST_BYTES
-        ):
+        # CHANGED: Avoid a third full JSON serialization just to estimate
+        # escaped size. Snapshot file bodies are base64 ASCII; a 20% margin
+        # leaves room for Unicode-heavy metadata without another huge allocation.
+        if len(raw_data) <= int(MAX_SNAPSHOT_REQUEST_BYTES * 0.8):
             result = self._request(url, data=raw_data, method="POST")
             request_count = 1
             upload_mode = "single-request"
