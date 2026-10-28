@@ -1309,7 +1309,7 @@ class DashboardView(QWidget):
                 target_id = created["id"]
             progress("Verifying snapshot contents and uploading to Oryn Cloud…")
             upload_started = time.perf_counter()
-            result = self.client.create_snapshot(target_id, snapshot)
+            result = self.client.create_snapshot(target_id, snapshot, progress=progress)
             upload_seconds = time.perf_counter() - upload_started
             return {
                 "result": result,
