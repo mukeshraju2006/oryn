@@ -53,7 +53,7 @@ jobs:
         run: python -m compileall -q oryn gui server test_path_mapping.py test_cloud.py test_browser.py test_gui_launch.py test_snapshot_numbering.py test_qt_app.py test_auth_validation.py test_workspace_management.py test_snapshot_migrations.py test_snapshot_integrity.py test_cloud_client.py test_snapshot_uploads.py test_vscode_project_capture.py
 
       - name: Run non-GUI regression tests
-        run: python -m pytest -q test_path_mapping.py test_snapshot_numbering.py test_qt_app.py test_auth_validation.py test_workspace_management.py test_snapshot_migrations.py test_snapshot_integrity.py test_cloud_client.py test_snapshot_uploads.py
+        run: python -m pytest -q test_path_mapping.py test_snapshot_numbering.py test_qt_app.py test_auth_validation.py test_workspace_management.py test_snapshot_migrations.py test_snapshot_integrity.py test_cloud_client.py test_snapshot_uploads.py test_vscode_project_capture.py
 
       - name: Smoke-test production API and database
         if: runner.os == 'Linux' && github.ref == 'refs/heads/main' && github.event_name == 'push'
