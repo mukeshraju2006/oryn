@@ -1,4 +1,12 @@
+"""Regression test for metadata-first restore preview."""
+import os
 
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
+import pytest
+from PySide6.QtWidgets import QApplication
+
+from gui.qt_app import DashboardView
 
 
 @pytest.fixture(scope="module")
