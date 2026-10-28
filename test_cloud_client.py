@@ -1,5 +1,7 @@
 """Cloud client retry and timing regression tests."""
 
+import base64
+import hashlib
 import json
 from urllib.error import URLError
 
@@ -156,3 +158,58 @@ def test_large_snapshot_uploads_every_project_file_in_verified_chunks(monkeypatc
     assert payload["project"]["files"][0]["data"] == encoded
     assert "omitted_files" not in payload["project"]
     assert migrate_snapshot_data(payload)["application"] == "vscode"
+
+
+def test_large_snapshot_download_uses_verified_chunks(monkeypatch):
+    import math
+
+    client = CloudClient(base_url="https://example.invalid")
+    payload = {
+        "version": 5,
+        "application": "vscode",
+        "workspace": {"path": "/tmp/project"},
+        "files": [],
+        "browser_urls": [],
+        "project": {
+            "root": ".",
+            "directories": [],
+            "files": [{
+                "path": "large.bin",
+                "data": "x" * (4 * 1024 * 1024),
+                "size": 4 * 1024 * 1024,
+                "encoding": "base64",
+            }],
+        },
+    }
+    raw = json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    chunk_bytes = 512 * 1024
+    chunk_count = math.ceil(len(raw) / chunk_bytes)
+    calls = []
+
+    def fake_request(url, data=None, method="GET", content_encoding=None):
+        calls.append(url)
+        if url.endswith("/download-manifest"):
+            return {
+                "snapshot_id": 42,
+                "total_bytes": len(raw),
+                "chunk_bytes": chunk_bytes,
+                "chunk_count": chunk_count,
+                "sha256": hashlib.sha256(raw).hexdigest(),
+            }
+        if "/download-chunks/" in url:
+            index = int(url.rsplit("/", 1)[1])
+            chunk = raw[index * chunk_bytes:(index + 1) * chunk_bytes]
+            return {
+                "snapshot_id": 42,
+                "chunk_index": index,
+                "sha256": hashlib.sha256(chunk).hexdigest(),
+                "data": base64.b64encode(chunk).decode("ascii"),
+            }
+        raise AssertionError(f"Unexpected request: {url}")
+
+    monkeypatch.setattr(client, "_request", fake_request)
+    result = client.get_snapshot(7, 42)
+
+    assert result["project"]["files"][0]["path"] == "large.bin"
+    assert len(calls) == chunk_count + 1
+    assert all("/download-chunks/" in url for url in calls[1:])
