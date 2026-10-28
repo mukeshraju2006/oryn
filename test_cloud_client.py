@@ -2,6 +2,7 @@
 
 import base64
 import hashlib
+import gzip
 import json
 from urllib.error import URLError
 
@@ -295,3 +296,41 @@ def test_restore_payload_uses_manifest_without_project_bodies(monkeypatch):
     assert calls == ["https://example.invalid/workspaces/7/snapshots/42/restore-payload"]
     assert result["project_manifest"][0]["path"] == "main.py"
     assert "data" not in result["project"]["files"][0]
+
+
+def test_compresses_source_heavy_snapshot_when_it_reduces_upload_size(monkeypatch):
+    client = CloudClient(base_url="https://example.invalid")
+    captured = {}
+
+    class SnapshotStub:
+        def to_dict(self):
+            content = base64.b64encode(b"repeatable source text\n" * 30000).decode("ascii")
+            return {
+                "version": 5,
+                "application": "vscode",
+                "workspace": {"path": "/tmp/project"},
+                "files": [],
+                "browser_urls": [],
+                "project": {
+                    "root": ".",
+                    "directories": [],
+                    "files": [{
+                        "path": "main.py",
+                        "data": content,
+                        "size": len(base64.b64decode(content)),
+                        "encoding": "base64",
+                    }],
+                },
+            }
+
+    def fake_request(url, data=None, method="GET", content_encoding=None):
+        captured.update(url=url, data=data, method=method, encoding=content_encoding)
+        return {"id": 11}
+
+    monkeypatch.setattr(client, "_request", fake_request)
+    result = client.create_snapshot(3, SnapshotStub())
+
+    assert result["id"] == 11
+    assert captured["encoding"] == "gzip"
+    decoded = json.loads(gzip.decompress(captured["data"]).decode("utf-8"))
+    assert decoded["project"]["files"][0]["path"] == "main.py"
