@@ -213,3 +213,57 @@ def test_large_snapshot_download_uses_verified_chunks(monkeypatch):
     assert result["project"]["files"][0]["path"] == "large.bin"
     assert len(calls) == chunk_count + 1
     assert all("/download-chunks/" in url for url in calls[1:])
+
+
+def test_small_snapshot_download_is_verified_against_manifest(monkeypatch):
+    client = CloudClient(base_url="https://example.invalid")
+    payload = {
+        "version": 5,
+        "application": "vscode",
+        "workspace": {"path": "/tmp/project"},
+        "files": [],
+        "browser_urls": [],
+    }
+    raw = json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+
+    def fake_request(url, data=None, method="GET", content_encoding=None):
+        if url.endswith("/download-manifest"):
+            return {
+                "total_bytes": len(raw),
+                "chunk_bytes": 512 * 1024,
+                "chunk_count": 1,
+                "sha256": hashlib.sha256(raw).hexdigest(),
+            }
+        if url.endswith("/snapshots/42"):
+            return payload
+        raise AssertionError(f"Unexpected request: {url}")
+
+    monkeypatch.setattr(client, "_request", fake_request)
+    assert client.get_snapshot(7, 42)["application"] == "vscode"
+
+
+def test_small_snapshot_download_rejects_checksum_mismatch(monkeypatch):
+    client = CloudClient(base_url="https://example.invalid")
+    payload = {
+        "version": 5,
+        "application": "vscode",
+        "workspace": {"path": "/tmp/project"},
+        "files": [],
+        "browser_urls": [],
+    }
+
+    def fake_request(url, data=None, method="GET", content_encoding=None):
+        if url.endswith("/download-manifest"):
+            return {
+                "total_bytes": 999,
+                "chunk_bytes": 512 * 1024,
+                "chunk_count": 1,
+                "sha256": "0" * 64,
+            }
+        if url.endswith("/snapshots/42"):
+            return payload
+        raise AssertionError(f"Unexpected request: {url}")
+
+    monkeypatch.setattr(client, "_request", fake_request)
+    with pytest.raises(ValueError, match="byte count does not match"):
+        client.get_snapshot(7, 42)
