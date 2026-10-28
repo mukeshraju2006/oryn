@@ -257,11 +257,46 @@ def finalize_snapshot_upload(
         raise HTTPException(status_code=422, detail="Snapshot payload must be a JSON object.")
     _validate_snapshot(snapshot_data, len(raw))
 
+    # Persist only session metadata in JSON. The exact verified original
+    # payload remains in the already-uploaded, checksummed chunk rows, avoiding
+    # a second full-size JSONB/BYTEA write during finalization.
+    stored_data = dict(snapshot_data)
+    stored_data.pop("_integrity", None)
+    project = stored_data.get("project")
+    manifest = []
+    if isinstance(project, dict):
+        reduced_project = dict(project)
+        reduced_files = []
+        for item in project.get("files") or []:
+            if not isinstance(item, dict):
+                continue
+            reduced_item = {key: value for key, value in item.items() if key != "data"}
+            encoded = item.get("data")
+            digest = item.get("sha256")
+            size = item.get("size")
+            if not (
+                isinstance(digest, str)
+                and re.fullmatch(r"[0-9a-f]{64}", digest)
+                and isinstance(size, int)
+                and not isinstance(size, bool)
+            ):
+                try:
+                    file_bytes = base64.b64decode(encoded, validate=True) if isinstance(encoded, str) else b""
+                except (ValueError, base64.binascii.Error):
+                    file_bytes = b""
+                digest = hashlib.sha256(file_bytes).hexdigest()
+                size = len(file_bytes)
+            manifest.append({"path": item.get("path", ""), "size": size, "sha256": digest})
+            reduced_files.append(reduced_item)
+        reduced_project["files"] = reduced_files
+        stored_data["project"] = reduced_project
+    stored_data["project_manifest"] = manifest
+
     snapshot = Snapshot(
         workspace_id=workspace_id,
         version=snapshot_data.get("version", 1),
-        data=snapshot_data,
-        raw_payload=raw,
+        data=stored_data,
+        raw_payload=None,
     )
     db.add(snapshot)
     db.flush()
@@ -274,11 +309,8 @@ def finalize_snapshot_upload(
     # CHANGED: Retain the upload receipt for idempotent finalize retries,
     # but discard staged bytes once the complete snapshot has been committed.
     upload.snapshot_id = snapshot.id
-    db.execute(
-        delete(SnapshotUploadChunk).where(
-            SnapshotUploadChunk.upload_id == upload_id
-        )
-    )
+    # Keep these verified chunks as the durable payload store. Do not
+    # delete them after finalization: download endpoints read from them.
     db.commit()
     db.refresh(snapshot)
     return {
@@ -333,8 +365,12 @@ def snapshot_restore_payload(
     if snapshot is None:
         raise HTTPException(status_code=404, detail="Snapshot not found.")
 
-    raw = _snapshot_raw_payload(snapshot, db)
     data = snapshot.data or {}
+    # Chunk-backed snapshots already have a precomputed project manifest and
+    # intentionally omit file bodies from the metadata JSON.
+    if isinstance(data.get("project_manifest"), list):
+        return data
+    raw = _snapshot_raw_payload(snapshot, db)
     _validate_snapshot(data, len(raw))
 
     project = data.get("project")
@@ -413,12 +449,20 @@ def snapshot_download_manifest(
     )
     if snapshot is None:
         raise HTTPException(status_code=404, detail="Snapshot not found.")
+    upload = db.scalar(
+        select(SnapshotUpload).where(SnapshotUpload.snapshot_id == snapshot.id)
+    )
+    if upload is not None:
+        return {
+            "snapshot_id": snapshot.id,
+            "total_bytes": upload.total_bytes,
+            "chunk_bytes": CHUNK_BYTES,
+            "chunk_count": upload.chunk_count,
+            "sha256": upload.sha256,
+        }
     raw = _snapshot_raw_payload(snapshot, db)
     if len(raw) > MAX_UPLOAD_BYTES:
-        raise HTTPException(
-            status_code=413,
-            detail="This saved snapshot exceeds the current 256 MiB download limit.",
-        )
+        raise HTTPException(status_code=413, detail="This saved snapshot exceeds the current 256 MiB download limit.")
     return {
         "snapshot_id": snapshot.id,
         "total_bytes": len(raw),
@@ -446,8 +490,27 @@ def snapshot_download_chunk(
     )
     if snapshot is None:
         raise HTTPException(status_code=404, detail="Snapshot not found.")
-    # CHANGED: Use the same cached bytes as the manifest so each chunk
-    # request avoids serializing the complete snapshot JSON again.
+    upload = db.scalar(
+        select(SnapshotUpload).where(SnapshotUpload.snapshot_id == snapshot.id)
+    )
+    if upload is not None:
+        if isinstance(chunk_index, bool) or not 0 <= chunk_index < upload.chunk_count:
+            raise HTTPException(status_code=422, detail="Download chunk index is out of range.")
+        stored_chunk = db.scalar(
+            select(SnapshotUploadChunk).where(
+                SnapshotUploadChunk.upload_id == upload.id,
+                SnapshotUploadChunk.chunk_index == chunk_index,
+            )
+        )
+        if stored_chunk is None:
+            raise HTTPException(status_code=409, detail="A verified snapshot chunk is missing.")
+        chunk = bytes(stored_chunk.data)
+        return {
+            "snapshot_id": snapshot.id,
+            "chunk_index": chunk_index,
+            "sha256": stored_chunk.sha256,
+            "data": base64.b64encode(chunk).decode("ascii"),
+        }
     raw = _snapshot_raw_payload(snapshot, db)
     if len(raw) > MAX_UPLOAD_BYTES:
         raise HTTPException(status_code=413, detail="Snapshot exceeds the download size limit.")

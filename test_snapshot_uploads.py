@@ -107,6 +107,7 @@ def test_chunked_upload_verifies_full_payload_and_finalize_is_idempotent(db_and_
     assert saved.data["project"]["files"][0]["path"] == "hello.txt"
     assert "data" not in saved.data["project"]["files"][0]
     assert saved.raw_payload is None
+    assert saved.data["project_manifest"][0]["sha256"] == hashlib.sha256(b"hello").hexdigest()
     # The original verified chunks are the durable payload store, not a
     # temporary copy to be deleted after a large database write.
     stored_chunks = db.scalars(select(SnapshotUploadChunk)).all()
