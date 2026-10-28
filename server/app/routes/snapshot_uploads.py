@@ -360,9 +360,9 @@ def snapshot_download_chunk(
     )
     if snapshot is None:
         raise HTTPException(status_code=404, detail="Snapshot not found.")
-    raw = json.dumps(
-        snapshot.data, separators=(",", ":"), ensure_ascii=False,
-    ).encode("utf-8")
+    # CHANGED: Use the same cached bytes as the manifest so each chunk
+    # request avoids serializing the complete snapshot JSON again.
+    raw = _snapshot_raw_payload(snapshot, db)
     if len(raw) > MAX_UPLOAD_BYTES:
         raise HTTPException(status_code=413, detail="Snapshot exceeds the download size limit.")
     chunk_count = (len(raw) + CHUNK_BYTES - 1) // CHUNK_BYTES
