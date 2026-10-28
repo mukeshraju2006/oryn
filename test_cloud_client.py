@@ -127,7 +127,7 @@ def test_large_snapshot_uploads_every_project_file_in_verified_chunks(monkeypatc
         if url.endswith("/snapshot-uploads") and method == "POST":
             manifest = json.loads(data.decode("utf-8"))
             captured["manifest"] = manifest
-            return {"upload_id": "upload-test", "chunk_bytes": 512 * 1024, "chunk_count": manifest["chunk_count"], "total_bytes": manifest["total_bytes"]}
+            return {"upload_id": "upload-test", "chunk_bytes": 2 * 1024 * 1024, "chunk_count": manifest["chunk_count"], "total_bytes": manifest["total_bytes"]}
         if "/chunks/" in url and method == "PUT":
             index = int(url.rsplit("/", 1)[1])
             item = json.loads(data.decode("utf-8"))
@@ -182,7 +182,7 @@ def test_large_snapshot_download_uses_verified_chunks(monkeypatch):
         },
     }
     raw = json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
-    chunk_bytes = 512 * 1024
+    chunk_bytes = 2 * 1024 * 1024
     chunk_count = math.ceil(len(raw) / chunk_bytes)
     calls = []
     progress_messages = []
@@ -233,7 +233,7 @@ def test_small_snapshot_download_is_verified_against_manifest(monkeypatch):
         if url.endswith("/download-manifest"):
             return {
                 "total_bytes": len(raw),
-                "chunk_bytes": 512 * 1024,
+                "chunk_bytes": 2 * 1024 * 1024,
                 "chunk_count": 1,
                 "sha256": hashlib.sha256(raw).hexdigest(),
             }
@@ -259,7 +259,7 @@ def test_small_snapshot_download_rejects_checksum_mismatch(monkeypatch):
         if url.endswith("/download-manifest"):
             return {
                 "total_bytes": 999,
-                "chunk_bytes": 512 * 1024,
+                "chunk_bytes": 2 * 1024 * 1024,
                 "chunk_count": 1,
                 "sha256": "0" * 64,
             }
