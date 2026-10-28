@@ -1,5 +1,6 @@
 import base64
 import hashlib
+import gzip
 import hmac
 import json
 import os
@@ -216,10 +217,24 @@ class CloudClient:
         ).encode("utf-8")
 
         url = f"{self.base_url}/workspaces/{workspace_id}/snapshots"
+        # CHANGED: Compress payloads that fit the API's 8 MiB decoded limit.
+        # This reduces network transfer for source-heavy projects and avoids
+        # chunking when the compressed request fits the gateway limit.
+        compressed_data = gzip.compress(raw_data)
+        if (
+            len(raw_data) <= 8 * 1024 * 1024
+            and len(compressed_data) <= MAX_SNAPSHOT_REQUEST_BYTES
+            and len(compressed_data) < len(raw_data) * 0.9
+        ):
+            result = self._request(
+                url, data=compressed_data, method="POST", content_encoding="gzip"
+            )
+            request_count = 1
+            upload_mode = "gzip-single-request"
         # CHANGED: Avoid a third full JSON serialization just to estimate
         # escaped size. Snapshot file bodies are base64 ASCII; a 20% margin
         # leaves room for Unicode-heavy metadata without another huge allocation.
-        if len(raw_data) <= int(MAX_SNAPSHOT_REQUEST_BYTES * 0.8):
+        elif len(raw_data) <= int(MAX_SNAPSHOT_REQUEST_BYTES * 0.8):
             result = self._request(url, data=raw_data, method="POST")
             request_count = 1
             upload_mode = "single-request"
