@@ -1442,6 +1442,7 @@ class DashboardView(QWidget):
         if not isinstance(snapshot, dict) or not snapshot:
             show_error_dialog(self, "The selected snapshot could not be found.")
             return
+        number = snapshot.get("snapshot_number", snapshot_id)
         workspace = {"path": snapshot.get("project_path")}
         files = [None] * int(snapshot.get("file_count") or 0)
         urls = [None] * int(snapshot.get("browser_url_count") or 0)
@@ -1475,8 +1476,8 @@ class DashboardView(QWidget):
             f"Original project path: {source_path or 'Not recorded'}",
             f"Restore destination: {destination_text} ({destination_state})",
             f"Editor files: {len(files)}",
-            f"Project files stored for recovery: {len(project_files)}",
-            f"Project files omitted due to upload limit: {len(project.get('omitted_files') or []) if isinstance(project, dict) else 0}",
+            "Project file inventory: checked after download",
+            "Project file exclusions: checked after download",
             f"Browser tabs to open: {len(urls)}",
             f"Active file: {snapshot.get('active_file') or 'Not recorded'}",
             "",
@@ -1507,6 +1508,9 @@ class DashboardView(QWidget):
         if not isinstance(snapshot, dict) or not snapshot:
             show_error_dialog(self, "The selected snapshot could not be found.")
             return
+        # CHANGED: These values come from the validated payload, not list metadata.
+        files = snapshot.get("files") or []
+        urls = snapshot.get("browser_urls") or []
         def operation(progress):
             restore_started = time.perf_counter()
             app_type = snapshot.get("application")
