@@ -332,6 +332,12 @@ class CloudClient:
                 "project_files_included": len(
                     (project or {}).get("files") or []
                 ) if isinstance(project, dict) else 0,
+                "excluded_project_files": list(
+                    (project or {}).get("omitted_files") or []
+                ) if isinstance(project, dict) else [],
+                "exclusion_reasons": dict(
+                    (project or {}).get("exclusion_reasons") or {}
+                ) if isinstance(project, dict) else {},
                 "upload_mode": upload_mode,
                 "upload_requests": request_count,
                 "verified_bytes": len(raw_data),
