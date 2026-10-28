@@ -293,3 +293,73 @@ def cancel_snapshot_upload(
         db.delete(upload)
         db.commit()
     return {"cancelled": True}
+
+
+@router.get("/{workspace_id}/snapshots/{snapshot_id}/download-manifest")
+def snapshot_download_manifest(
+    workspace_id: int,
+    snapshot_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Describe a snapshot download without returning its potentially huge body."""
+    _owned_workspace(workspace_id, current_user, db)
+    snapshot = db.scalar(
+        select(Snapshot).where(
+            Snapshot.id == snapshot_id,
+            Snapshot.workspace_id == workspace_id,
+        )
+    )
+    if snapshot is None:
+        raise HTTPException(status_code=404, detail="Snapshot not found.")
+    raw = json.dumps(
+        snapshot.data, separators=(",", ":"), ensure_ascii=False,
+    ).encode("utf-8")
+    if len(raw) > MAX_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail="This saved snapshot exceeds the current 256 MiB download limit.",
+        )
+    return {
+        "snapshot_id": snapshot.id,
+        "total_bytes": len(raw),
+        "chunk_bytes": CHUNK_BYTES,
+        "chunk_count": (len(raw) + CHUNK_BYTES - 1) // CHUNK_BYTES,
+        "sha256": hashlib.sha256(raw).hexdigest(),
+    }
+
+
+@router.get("/{workspace_id}/snapshots/{snapshot_id}/download-chunks/{chunk_index}")
+def snapshot_download_chunk(
+    workspace_id: int,
+    snapshot_id: int,
+    chunk_index: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Return one bounded, checksummed chunk of a stored snapshot."""
+    _owned_workspace(workspace_id, current_user, db)
+    snapshot = db.scalar(
+        select(Snapshot).where(
+            Snapshot.id == snapshot_id,
+            Snapshot.workspace_id == workspace_id,
+        )
+    )
+    if snapshot is None:
+        raise HTTPException(status_code=404, detail="Snapshot not found.")
+    raw = json.dumps(
+        snapshot.data, separators=(",", ":"), ensure_ascii=False,
+    ).encode("utf-8")
+    if len(raw) > MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="Snapshot exceeds the download size limit.")
+    chunk_count = (len(raw) + CHUNK_BYTES - 1) // CHUNK_BYTES
+    if isinstance(chunk_index, bool) or not 0 <= chunk_index < chunk_count:
+        raise HTTPException(status_code=422, detail="Download chunk index is out of range.")
+    start = chunk_index * CHUNK_BYTES
+    chunk = raw[start:start + CHUNK_BYTES]
+    return {
+        "snapshot_id": snapshot.id,
+        "chunk_index": chunk_index,
+        "sha256": hashlib.sha256(chunk).hexdigest(),
+        "data": base64.b64encode(chunk).decode("ascii"),
+    }
