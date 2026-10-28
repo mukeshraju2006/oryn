@@ -17,10 +17,12 @@ from server.app.models.snapshot import Snapshot
 from server.app.models.snapshot_upload import SnapshotUploadChunk
 from server.app.models.user import User
 from server.app.models.workspace import Workspace
-from server.app.routes.snapshot_uploads import (
+from server.app.routes.snapshot_uploads import (\n    CHUNK_BYTES,
     begin_snapshot_upload,
     finalize_snapshot_upload,
     put_snapshot_chunk,
+    snapshot_download_manifest,
+    snapshot_download_chunk,
 )
 
 
@@ -121,3 +123,58 @@ def test_incomplete_upload_cannot_create_a_snapshot(db_and_user):
         finalize_snapshot_upload(workspace.id, upload["upload_id"], db, user)
     assert error.value.status_code == 409
     assert db.scalars(select(Snapshot)).all() == []
+
+
+def test_large_snapshot_download_manifest_and_chunks_are_checksummed(db_and_user):
+    db, user, workspace = db_and_user
+    payload = {
+        "version": 5,
+        "application": "vscode",
+        "workspace": {"path": "/tmp/project"},
+        "files": [],
+        "browser_urls": [],
+        "project": {
+            "root": ".",
+            "directories": [],
+            "files": [{
+                "path": "large.bin",
+                "data": "z" * (600_000),
+                "size": 600_000,
+                "encoding": "base64",
+            }],
+        },
+    }
+    snapshot = Snapshot(workspace_id=workspace.id, version=5, data=payload)
+    db.add(snapshot)
+    db.commit()
+    db.refresh(snapshot)
+
+    manifest = snapshot_download_manifest(workspace.id, snapshot.id, db, user)
+    assert manifest["total_bytes"] > manifest["chunk_bytes"]
+    assert manifest["chunk_count"] == 2
+
+    parts = []
+    for index in range(manifest["chunk_count"]):
+        part = snapshot_download_chunk(workspace.id, snapshot.id, index, db, user)
+        chunk = base64.b64decode(part["data"], validate=True)
+        assert hashlib.sha256(chunk).hexdigest() == part["sha256"]
+        parts.append(chunk)
+    restored = b"".join(parts)
+    assert hashlib.sha256(restored).hexdigest() == manifest["sha256"]
+    assert json.loads(restored.decode("utf-8"))["project"]["files"][0]["path"] == "large.bin"
+
+
+def test_snapshot_download_is_scoped_to_workspace_owner(db_and_user):
+    db, user, workspace = db_and_user
+    stranger = User(email="chunk-stranger@example.test", password_hash="unused")
+    db.add(stranger)
+    db.commit()
+    db.refresh(stranger)
+    snapshot = Snapshot(workspace_id=workspace.id, version=1, data={"version": 1})
+    db.add(snapshot)
+    db.commit()
+    db.refresh(snapshot)
+
+    with pytest.raises(HTTPException) as error:
+        snapshot_download_manifest(workspace.id, snapshot.id, db, stranger)
+    assert error.value.status_code == 404
