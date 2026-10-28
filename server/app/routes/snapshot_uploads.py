@@ -21,7 +21,7 @@ from server.app.routes.auth import get_current_user
 router = APIRouter(prefix="/workspaces", tags=["snapshot uploads"])
 
 # CHANGED: Keep each HTTP request small; the full payload can be much larger.
-CHUNK_BYTES = 512 * 1024
+CHUNK_BYTES = 2 * 1024 * 1024  # CHANGED: reduce HTTP round trips for large snapshots
 MAX_UPLOAD_BYTES = 256 * 1024 * 1024
 MAX_SNAPSHOT_VERSION = 5
 
@@ -308,6 +308,70 @@ def cancel_snapshot_upload(
         db.delete(upload)
         db.commit()
     return {"cancelled": True}
+
+
+@router.get("/{workspace_id}/snapshots/{snapshot_id}/restore-payload")
+def snapshot_restore_payload(
+    workspace_id: int,
+    snapshot_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Return verified editor state and file hashes without project file bodies."""
+    _owned_workspace(workspace_id, current_user, db)
+    snapshot = db.scalar(
+        select(Snapshot).where(
+            Snapshot.id == snapshot_id,
+            Snapshot.workspace_id == workspace_id,
+        )
+    )
+    if snapshot is None:
+        raise HTTPException(status_code=404, detail="Snapshot not found.")
+
+    raw = _snapshot_raw_payload(snapshot, db)
+    data = snapshot.data or {}
+    _validate_snapshot(data, len(raw))
+
+    project = data.get("project")
+    manifest = []
+    if isinstance(project, dict):
+        for item in project.get("files") or []:
+            if not isinstance(item, dict) or not isinstance(item.get("path"), str):
+                continue
+            encoded = item.get("data")
+            if not isinstance(encoded, str):
+                manifest.append({
+                    "path": item["path"],
+                    "size": item.get("size"),
+                    "sha256": item.get("sha256"),
+                })
+                continue
+            try:
+                content = base64.b64decode(encoded, validate=True)
+            except (ValueError, base64.binascii.Error) as error:
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"Snapshot project file is invalid: {item['path']}",
+                ) from error
+            manifest.append({
+                "path": item["path"],
+                "size": len(content),
+                "sha256": hashlib.sha256(content).hexdigest(),
+            })
+
+    # Copy rather than mutate SQLAlchemy's persisted JSON value.
+    reduced = dict(data)
+    reduced.pop("_integrity", None)
+    if isinstance(project, dict):
+        reduced_project = dict(project)
+        reduced_project["files"] = [
+            {key: value for key, value in item.items() if key != "data"}
+            for item in (project.get("files") or [])
+            if isinstance(item, dict)
+        ]
+        reduced["project"] = reduced_project
+    reduced["project_manifest"] = manifest
+    return reduced
 
 
 @router.get("/{workspace_id}/snapshots/{snapshot_id}/download-manifest")
