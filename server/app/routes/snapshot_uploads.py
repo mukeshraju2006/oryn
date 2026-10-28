@@ -100,8 +100,13 @@ def begin_snapshot_upload(
     _owned_workspace(workspace_id, current_user, db)
     # CHANGED: Reclaim abandoned uploads and old completion receipts.
     expired_before = (datetime.now(timezone.utc) - timedelta(days=1)).replace(tzinfo=None)
+    # Expire abandoned staging sessions only. Finalized uploads own the
+    # durable snapshot chunks used by download-manifest/download-chunks.
     db.execute(
-        delete(SnapshotUpload).where(SnapshotUpload.created_at < expired_before)
+        delete(SnapshotUpload).where(
+            SnapshotUpload.created_at < expired_before,
+            SnapshotUpload.snapshot_id.is_(None),
+        )
     )
     db.commit()
     total_bytes = data.get("total_bytes")
