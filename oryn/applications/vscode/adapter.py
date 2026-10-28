@@ -2258,6 +2258,107 @@ class VSCodeAdapter:
 
         return True
 
+    def restore_open_editors(self, workspace_path, snapshot_data):
+        """Explicitly reopen captured files and restore their cursor positions.
+
+        VS Code workspace mementos are implementation details and can be
+        ignored when a workspace is opened on another machine or after its
+        storage database has been initialized. The CLI is a supported fallback
+        for reopening files and positioning the caret. Raw mementos are still
+        restored separately for selections, scrolling, and editor groups.
+        """
+        executable = self._code_executable()
+        captured_files = snapshot_data.get("files") or []
+        active_file = snapshot_data.get("active_file")
+        files_by_path = {}
+
+        for file_data in captured_files:
+            if not isinstance(file_data, dict):
+                continue
+
+            file_path = file_data.get("path")
+            if not isinstance(file_path, str) or not file_path:
+                continue
+
+            parsed_path = self._snapshot_path(file_path)
+            if parsed_path is None or not parsed_path.is_file():
+                continue
+
+            normalized_path = str(parsed_path)
+            current = files_by_path.get(normalized_path)
+            is_active = bool(file_data.get("active")) or (
+                isinstance(active_file, str)
+                and self._paths_equivalent(file_path, active_file)
+            )
+
+            # A file can be open in multiple groups. The CLI cannot target a
+            # group, so use the active group's state when deduplicating and
+            # let the saved VS Code memento restore the group layout.
+            if current is None or (is_active and not current["active"]):
+                files_by_path[normalized_path] = {
+                    "path": normalized_path,
+                    "active": is_active,
+                    "cursor": file_data.get("cursor") or {},
+                }
+
+        if isinstance(active_file, str):
+            parsed_active = self._snapshot_path(active_file)
+            if parsed_active is not None and parsed_active.is_file():
+                active_path = str(parsed_active)
+                files_by_path.setdefault(
+                    active_path,
+                    {"path": active_path, "active": True, "cursor": {}},
+                )
+                files_by_path[active_path]["active"] = True
+
+        # Open the previous active file last so it becomes the foreground tab.
+        ordered_files = sorted(
+            files_by_path.values(),
+            key=lambda item: item["active"],
+        )
+        success = True
+
+        for file_data in ordered_files:
+            cursor = file_data.get("cursor") or {}
+            try:
+                line = max(1, int(cursor.get("line") or 1))
+            except (TypeError, ValueError):
+                line = 1
+            try:
+                column = max(1, int(cursor.get("column") or 1))
+            except (TypeError, ValueError):
+                column = 1
+
+            # Keep paths as separate argv entries to handle spaces safely and
+            # avoid shell-quoting differences between Linux and Windows.
+            target = f'{file_data["path"]}:{line}:{column}'
+            try:
+                result = subprocess.run(
+                    [
+                        executable,
+                        "--reuse-window",
+                        "--goto",
+                        target,
+                    ],
+                    capture_output=True,
+                    text=True,
+                    timeout=15.0,
+                    check=False,
+                )
+                if result.returncode != 0:
+                    success = False
+                    print(
+                        f'Could not reopen editor {file_data["path"]}: '
+                        f'{result.stderr.strip() or "VS Code CLI failed."}'
+                    )
+            except (OSError, subprocess.TimeoutExpired) as error:
+                success = False
+                print(
+                    f'Could not reopen editor {file_data["path"]}: {error}'
+                )
+
+        return success
+
     def capture(self, progress=None):
         active_file = self.get_active_file()
 
@@ -2749,6 +2850,18 @@ class VSCodeAdapter:
             destination_workspace
         ):
             return False
+
+        # Explicitly reopen captured editors after launching the workspace.
+        # This is a CLI fallback when VS Code ignores imported mementos.
+        if not self.restore_open_editors(
+            destination_workspace,
+            snapshot_copy,
+        ):
+            print(
+                "Workspace opened, but one or more editor tabs could not "
+                "be reopened explicitly. Raw editor state was restored "
+                "as a best effort."
+            )
 
         print(
             "VS Code workspace restored successfully."
