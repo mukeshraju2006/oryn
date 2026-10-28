@@ -1437,10 +1437,32 @@ class DashboardView(QWidget):
             {"id": snapshot_id, "snapshot_number": snapshot_id},
         )
         self._task(
-            lambda: self.client.get_restore_payload(workspace_id, snapshot_id),
+            lambda progress: self._load_restore_preview(
+                workspace_id, snapshot_id, progress
+            ),
             lambda payload: self._restore_preview(payload, snapshot_id, workspace_id),
             "Comparing local workspace with cloud snapshot…",
+            on_progress=self._log,
         )
+
+    def _load_restore_preview(self, workspace_id, snapshot_id, progress=None):
+        # CHANGED: Do disk hashing in the worker thread, never in the GUI thread.
+        payload = self.client.get_restore_payload(
+            workspace_id, snapshot_id, progress=progress
+        )
+        source_path = (payload.get("workspace") or {}).get("path")
+        adapter = VSCodeAdapter()
+        destination = (
+            adapter.map_workspace_to_current_home(source_path)
+            if source_path and payload.get("application") == "vscode"
+            else None
+        )
+        payload["_client_local_comparison"] = (
+            adapter.compare_project_manifest(destination, payload.get("project_manifest") or [])
+            if destination and payload.get("application") == "vscode"
+            else {"exists": False, "matches": False, "changed": [], "missing": []}
+        )
+        return payload
 
     def _restore_preview(self, snapshot, snapshot_id, workspace_id):
         if not isinstance(snapshot, dict) or not snapshot:
@@ -1464,7 +1486,7 @@ class DashboardView(QWidget):
             else "not available"
         )
         manifest = snapshot.get("project_manifest") or []
-        comparison = (
+        comparison = snapshot.get("_client_local_comparison") or (
             VSCodeAdapter().compare_project_manifest(destination, manifest)
             if destination and snapshot.get("application") == "vscode"
             else {"exists": False, "matches": False, "changed": [], "missing": []}
