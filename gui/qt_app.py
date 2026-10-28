@@ -1307,7 +1307,7 @@ class DashboardView(QWidget):
                 progress("Creating cloud workspace…")
                 created = self.client.create_workspace(f"Oryn Workspace {workspaces_count + 1}")
                 target_id = created["id"]
-            progress("Compressing snapshot and uploading to Oryn Cloud…")
+            progress("Verifying snapshot contents and uploading to Oryn Cloud…")
             upload_started = time.perf_counter()
             result = self.client.create_snapshot(target_id, snapshot)
             upload_seconds = time.perf_counter() - upload_started
@@ -1351,12 +1351,28 @@ class DashboardView(QWidget):
         if omitted:
             show_message_dialog(
                 self,
-                "Snapshot saved with exclusions",
-                f"Oryn saved the editor and browser state, but omitted {len(omitted)} "
-                "project file(s) to fit the cloud upload limit. The original project "
-                "files were not changed. Restoring this snapshot to a new directory "
-                "will not recreate the omitted files.",
+                "Snapshot saved with unexpected omissions",
+                f"The upload did not include {len(omitted)} project file(s). "
+                "This is unexpected for the current upload flow. Review the list "
+                "before relying on this snapshot.",
+                kind="warning",
                 details="Omitted project files:\\n" + "\\n".join(omitted),
+            )
+        excluded = capture_info.get("excluded_project_files") or []
+        reasons = capture_info.get("exclusion_reasons") or {}
+        if excluded:
+            show_message_dialog(
+                self,
+                "Snapshot saved with disclosed exclusions",
+                f"Oryn saved the snapshot, but {len(excluded)} path(s) were intentionally "
+                "excluded by the workspace capture safety policy. These paths are listed "
+                "below so you can see exactly what will not be restored. No other project "
+                "files were removed to fit the upload request.",
+                kind="warning",
+                details="Excluded paths and reasons:\\n" + "\\n".join(
+                    f"{path} — {reasons.get(path, 'excluded by capture policy')}"
+                    for path in excluded
+                ),
             )
         self.load_workspaces()
 
