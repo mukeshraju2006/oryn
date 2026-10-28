@@ -339,11 +339,28 @@ def snapshot_restore_payload(
             if not isinstance(item, dict) or not isinstance(item.get("path"), str):
                 continue
             encoded = item.get("data")
+            declared_hash = item.get("sha256")
+            declared_size = item.get("size")
+            if (
+                isinstance(declared_hash, str)
+                and len(declared_hash) == 64
+                and all(char in "0123456789abcdef" for char in declared_hash)
+                and isinstance(declared_size, int)
+                and not isinstance(declared_size, bool)
+            ):
+                # New snapshots hash file bytes during capture, so preview does
+                # not have to base64-decode every project file on the server.
+                manifest.append({
+                    "path": item["path"],
+                    "size": declared_size,
+                    "sha256": declared_hash,
+                })
+                continue
             if not isinstance(encoded, str):
                 manifest.append({
                     "path": item["path"],
-                    "size": item.get("size"),
-                    "sha256": item.get("sha256"),
+                    "size": declared_size,
+                    "sha256": declared_hash,
                 })
                 continue
             try:
