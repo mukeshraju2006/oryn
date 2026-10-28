@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import DateTime, ForeignKey, Integer, JSON
+from sqlalchemy import DateTime, ForeignKey, Integer, JSON, LargeBinary
 from sqlalchemy.orm import Mapped, mapped_column
 
 from server.app.database import Base
@@ -28,6 +28,13 @@ class Snapshot(Base):
     data: Mapped[dict] = mapped_column(
         JSON,
         nullable=False,
+    )
+
+    # CHANGED: Preserve the exact verified upload bytes. Re-serializing a large
+    # JSON document for every 512 KiB download request is needlessly expensive.
+    raw_payload: Mapped[bytes | None] = mapped_column(
+        LargeBinary,
+        nullable=True,
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime,
