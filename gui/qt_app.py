@@ -1447,7 +1447,7 @@ class DashboardView(QWidget):
             show_error_dialog(self, "The selected snapshot could not be found.")
             return
         number = snapshot.get("snapshot_number", snapshot_id)
-        workspace = {"path": snapshot.get("project_path")}
+        workspace = snapshot.get("workspace") or {"path": snapshot.get("project_path")}
         files = [None] * int(snapshot.get("file_count") or 0)
         urls = [None] * int(snapshot.get("browser_url_count") or 0)
         project = {}
