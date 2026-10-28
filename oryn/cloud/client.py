@@ -370,6 +370,7 @@ class CloudClient:
         self,
         workspace_id,
         snapshot_id,
+        progress=None,
     ):
         from oryn.core.snapshot import migrate_snapshot_data
 
@@ -379,6 +380,8 @@ class CloudClient:
             f"{self.base_url}/workspaces/{workspace_id}"
             f"/snapshots/{snapshot_id}/download-manifest"
         )
+        if progress is not None:
+            progress("Checking snapshot manifest and integrity metadata…")
         manifest = self._request(manifest_url)
         total_bytes = manifest.get("total_bytes")
         chunk_bytes = manifest.get("chunk_bytes")
@@ -396,6 +399,8 @@ class CloudClient:
             raise ValueError("The server returned an invalid snapshot download manifest.")
 
         if total_bytes <= MAX_SNAPSHOT_REQUEST_BYTES:
+            if progress is not None:
+                progress("Downloading and validating saved snapshot…")
             url = (
                 f"{self.base_url}/workspaces/{workspace_id}"
                 f"/snapshots/{snapshot_id}"
@@ -414,6 +419,10 @@ class CloudClient:
 
         chunks = []
         for index in range(chunk_count):
+            if progress is not None:
+                progress(
+                    f"Downloading and verifying snapshot chunk {index + 1} of {chunk_count}…"
+                )
             chunk_url = (
                 f"{self.base_url}/workspaces/{workspace_id}"
                 f"/snapshots/{snapshot_id}/download-chunks/{index}"
@@ -434,6 +443,8 @@ class CloudClient:
                 raise ValueError(f"Snapshot download chunk {index} has an unexpected size.")
             chunks.append(chunk)
 
+        if progress is not None:
+            progress("Checking complete snapshot checksum…")
         raw = b"".join(chunks)
         if len(raw) != total_bytes:
             raise ValueError("Snapshot download is incomplete: received byte count does not match.")

@@ -185,6 +185,7 @@ def test_large_snapshot_download_uses_verified_chunks(monkeypatch):
     chunk_bytes = 512 * 1024
     chunk_count = math.ceil(len(raw) / chunk_bytes)
     calls = []
+    progress_messages = []
 
     def fake_request(url, data=None, method="GET", content_encoding=None):
         calls.append(url)
@@ -208,9 +209,11 @@ def test_large_snapshot_download_uses_verified_chunks(monkeypatch):
         raise AssertionError(f"Unexpected request: {url}")
 
     monkeypatch.setattr(client, "_request", fake_request)
-    result = client.get_snapshot(7, 42)
+    result = client.get_snapshot(7, 42, progress=progress_messages.append)
 
     assert result["project"]["files"][0]["path"] == "large.bin"
+    assert any("chunk 1 of" in message for message in progress_messages)
+    assert any("complete snapshot checksum" in message for message in progress_messages)
     assert len(calls) == chunk_count + 1
     assert all("/download-chunks/" in url for url in calls[1:])
 

@@ -1429,21 +1429,25 @@ class DashboardView(QWidget):
         if snapshot_id is None or workspace_id is None:
             show_message_dialog(self, "Restore snapshot", "This snapshot is no longer available. Refresh the list and try again.")
             return
-        self._task(
-            lambda: self.client.get_snapshot(workspace_id, snapshot_id),
-            lambda snapshot: self._restore_preview(snapshot, snapshot_id, workspace_id),
-            "Loading restore preview…",
+        # CHANGED: The snapshot list already contains enough metadata for a
+        # useful preview. Do not download a potentially hundreds-of-megabytes
+        # payload until the user confirms restoration.
+        metadata = next(
+            (item for item in self.snapshots if item.get("id") == snapshot_id),
+            {"id": snapshot_id, "snapshot_number": snapshot_id},
         )
+        self._restore_preview(metadata, snapshot_id, workspace_id)
 
     def _restore_preview(self, snapshot, snapshot_id, workspace_id):
         if not isinstance(snapshot, dict) or not snapshot:
             show_error_dialog(self, "The selected snapshot could not be found.")
             return
-        workspace = snapshot.get("workspace") or {}
-        files = snapshot.get("files") or []
-        urls = snapshot.get("browser_urls") or []
-        project = snapshot.get("project") or {}
-        project_files = project.get("files") or [] if isinstance(project, dict) else []
+        number = snapshot.get("snapshot_number", snapshot_id)
+        workspace = {"path": snapshot.get("project_path")}
+        files = [None] * int(snapshot.get("file_count") or 0)
+        urls = [None] * int(snapshot.get("browser_url_count") or 0)
+        project = {}
+        project_files = []
         source_path = workspace.get("path")
         destination = (
             VSCodeAdapter().map_workspace_to_current_home(source_path)
@@ -1472,8 +1476,8 @@ class DashboardView(QWidget):
             f"Original project path: {source_path or 'Not recorded'}",
             f"Restore destination: {destination_text} ({destination_state})",
             f"Editor files: {len(files)}",
-            f"Project files stored for recovery: {len(project_files)}",
-            f"Project files omitted due to upload limit: {len(project.get('omitted_files') or []) if isinstance(project, dict) else 0}",
+            "Project file inventory: checked after download",
+            "Project file exclusions: checked after download",
             f"Browser tabs to open: {len(urls)}",
             f"Active file: {snapshot.get('active_file') or 'Not recorded'}",
             "",
@@ -1486,6 +1490,27 @@ class DashboardView(QWidget):
         ):
             return
 
+        # CHANGED: Fetch and verify the payload only after confirmation. The
+        # download runs in a worker thread and reports progress instead of
+        # leaving the user staring at a preview spinner with no explanation.
+        self._task(
+            lambda progress: self.client.get_snapshot(
+                workspace_id, snapshot_id, progress=progress
+            ),
+            lambda full_snapshot: self._restore_snapshot_data(
+                full_snapshot, snapshot_id, workspace_id
+            ),
+            "Downloading and validating snapshot…",
+            on_progress=self._log,
+        )
+
+    def _restore_snapshot_data(self, snapshot, snapshot_id, workspace_id):
+        if not isinstance(snapshot, dict) or not snapshot:
+            show_error_dialog(self, "The selected snapshot could not be found.")
+            return
+        # CHANGED: These values come from the validated payload, not list metadata.
+        files = snapshot.get("files") or []
+        urls = snapshot.get("browser_urls") or []
         def operation(progress):
             restore_started = time.perf_counter()
             app_type = snapshot.get("application")

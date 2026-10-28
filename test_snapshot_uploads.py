@@ -104,6 +104,8 @@ def test_chunked_upload_verifies_full_payload_and_finalize_is_idempotent(db_and_
     assert second["already_finalized"] is True
     saved = db.get(Snapshot, first["id"])
     assert saved.data["project"]["files"][0]["path"] == "hello.txt"
+    # CHANGED: Preserve the exact verified upload bytes for future downloads.
+    assert saved.raw_payload == raw
     assert db.scalars(select(SnapshotUploadChunk)).all() == []
 
 
@@ -151,6 +153,9 @@ def test_large_snapshot_download_manifest_and_chunks_are_checksummed(db_and_user
     db.refresh(snapshot)
 
     manifest = snapshot_download_manifest(workspace.id, snapshot.id, db, user)
+    # CHANGED: Legacy snapshots are serialized and cached once at first access.
+    assert snapshot.raw_payload is not None
+    assert len(snapshot.raw_payload) == manifest["total_bytes"]
     assert manifest["total_bytes"] > manifest["chunk_bytes"]
     assert manifest["chunk_count"] == 2
 
