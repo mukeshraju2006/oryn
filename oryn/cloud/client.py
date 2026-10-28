@@ -353,13 +353,67 @@ class CloudClient:
     ):
         from oryn.core.snapshot import migrate_snapshot_data
 
-        url = (
-            f"{self.base_url}"
-            f"/workspaces/{workspace_id}"
-            f"/snapshots/{snapshot_id}"
+        # CHANGED: Probe size before downloading. A large snapshot must not
+        # be returned as one giant response through a serverless gateway.
+        manifest_url = (
+            f"{self.base_url}/workspaces/{workspace_id}"
+            f"/snapshots/{snapshot_id}/download-manifest"
         )
+        manifest = self._request(manifest_url)
+        total_bytes = manifest.get("total_bytes")
+        chunk_bytes = manifest.get("chunk_bytes")
+        chunk_count = manifest.get("chunk_count")
+        digest = manifest.get("sha256")
+        if (
+            isinstance(total_bytes, bool) or not isinstance(total_bytes, int)
+            or total_bytes < 0 or total_bytes > 256 * 1024 * 1024
+            or isinstance(chunk_bytes, bool) or not isinstance(chunk_bytes, int)
+            or chunk_bytes <= 0
+            or isinstance(chunk_count, bool) or not isinstance(chunk_count, int)
+            or chunk_count != (total_bytes + chunk_bytes - 1) // chunk_bytes
+            or not isinstance(digest, str) or len(digest) != 64
+        ):
+            raise ValueError("The server returned an invalid snapshot download manifest.")
 
-        return migrate_snapshot_data(self._request(url))
+        if total_bytes <= MAX_SNAPSHOT_REQUEST_BYTES:
+            url = (
+                f"{self.base_url}/workspaces/{workspace_id}"
+                f"/snapshots/{snapshot_id}"
+            )
+            return migrate_snapshot_data(self._request(url))
+
+        chunks = []
+        for index in range(chunk_count):
+            chunk_url = (
+                f"{self.base_url}/workspaces/{workspace_id}"
+                f"/snapshots/{snapshot_id}/download-chunks/{index}"
+            )
+            item = self._request(chunk_url)
+            if item.get("snapshot_id") != snapshot_id or item.get("chunk_index") != index:
+                raise ValueError(f"Snapshot download returned an unexpected chunk at index {index}.")
+            try:
+                chunk = base64.b64decode(item["data"], validate=True)
+            except (KeyError, ValueError, base64.binascii.Error) as exc:
+                raise ValueError(f"Snapshot download chunk {index} is not valid base64.") from exc
+            if not hmac.compare_digest(
+                hashlib.sha256(chunk).hexdigest(), str(item.get("sha256", ""))
+            ):
+                raise ValueError(f"Snapshot download chunk {index} failed checksum verification.")
+            expected_size = min(chunk_bytes, total_bytes - index * chunk_bytes)
+            if len(chunk) != expected_size:
+                raise ValueError(f"Snapshot download chunk {index} has an unexpected size.")
+            chunks.append(chunk)
+
+        raw = b"".join(chunks)
+        if len(raw) != total_bytes:
+            raise ValueError("Snapshot download is incomplete: received byte count does not match.")
+        if not hmac.compare_digest(hashlib.sha256(raw).hexdigest(), digest):
+            raise ValueError("Snapshot download failed the full-payload checksum.")
+        try:
+            payload = json.loads(raw.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise ValueError("Downloaded snapshot is not valid UTF-8 JSON.") from exc
+        return migrate_snapshot_data(payload)
 
     # CHANGED:
     # List authenticated snapshots.
