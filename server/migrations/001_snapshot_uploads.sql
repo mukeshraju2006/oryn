@@ -11,7 +11,7 @@ CREATE TABLE IF NOT EXISTS snapshot_uploads (
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 ALTER TABLE snapshot_uploads
-    ADD COLUMN IF NOT EXISTS snapshot_id INTEGER REFERENCES snapshots(id) ON DELETE SET NULL;
+    ADD COLUMN IF NOT EXISTS snapshot_id BIGINT REFERENCES snapshots(id) ON DELETE SET NULL;
 CREATE INDEX IF NOT EXISTS ix_snapshot_uploads_workspace_id ON snapshot_uploads(workspace_id);
 CREATE INDEX IF NOT EXISTS ix_snapshot_uploads_user_id ON snapshot_uploads(user_id);
 
