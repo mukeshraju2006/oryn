@@ -17,7 +17,8 @@ from server.app.models.snapshot import Snapshot
 from server.app.models.snapshot_upload import SnapshotUploadChunk
 from server.app.models.user import User
 from server.app.models.workspace import Workspace
-from server.app.routes.snapshot_uploads import (\n    CHUNK_BYTES,
+from server.app.routes.snapshot_uploads import (
+    CHUNK_BYTES,
     begin_snapshot_upload,
     finalize_snapshot_upload,
     put_snapshot_chunk,
