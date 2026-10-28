@@ -42,7 +42,7 @@ def test_restore_starts_with_local_manifest_comparison(qt_app, monkeypatch):
     view.restore_snapshot(snapshot_id=101, workspace_id=17)
 
     assert captured["activity"] == "Comparing local workspace with cloud snapshot…"
-    assert captured["kwargs"] == {}
+    assert captured["kwargs"]["on_progress"] is not None
     # The callback is deferred; previewing metadata does not call get_snapshot.
     assert callable(captured["function"])
     view.close()
