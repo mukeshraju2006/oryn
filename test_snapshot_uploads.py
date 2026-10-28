@@ -141,8 +141,8 @@ def test_large_snapshot_download_manifest_and_chunks_are_checksummed(db_and_user
             "directories": [],
             "files": [{
                 "path": "large.bin",
-                "data": "z" * (600_000),
-                "size": 600_000,
+                "data": "z" * (3_000_000),
+                "size": 3_000_000,
                 "encoding": "base64",
             }],
         },
