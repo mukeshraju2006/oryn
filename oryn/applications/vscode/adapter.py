@@ -1133,6 +1133,8 @@ class VSCodeAdapter:
                             "size": len(
                                 raw_data
                             ),
+                            # CHANGED: Reuse the capture-time hash for future local/cloud comparisons.
+                            "sha256": hashlib.sha256(raw_data).hexdigest(),
                             "encoding": "base64",
                         }
                     )
