@@ -2286,18 +2286,22 @@ class VSCodeAdapter:
 
             normalized_path = str(parsed_path)
             current = files_by_path.get(normalized_path)
-            is_active = bool(file_data.get("active")) or (
+            explicitly_active = bool(file_data.get("active"))
+            is_active = explicitly_active or (
                 isinstance(active_file, str)
                 and self._paths_equivalent(file_path, active_file)
             )
 
-            # A file can be open in multiple groups. The CLI cannot target a
-            # group, so use the active group's state when deduplicating and
-            # let the saved VS Code memento restore the group layout.
-            if current is None or (is_active and not current["active"]):
+            # A file can be open in multiple groups. Prefer the record
+            # explicitly marked active by capture; the active_file path alone
+            # cannot distinguish duplicate instances in different groups.
+            if current is None or (
+                explicitly_active and not current["explicitly_active"]
+            ):
                 files_by_path[normalized_path] = {
                     "path": normalized_path,
                     "active": is_active,
+                    "explicitly_active": explicitly_active,
                     "cursor": file_data.get("cursor") or {},
                 }
 
