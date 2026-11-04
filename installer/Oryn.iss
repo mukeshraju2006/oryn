@@ -8,6 +8,7 @@ AppId={{8D7B8B7B-9B21-4C7C-A8A4-ORYN00000001}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppPublisher={#MyAppPublisher}
+SetupIconFile=..\assets\oryn-icon.ico
 
 DefaultDirName={autopf}\Oryn
 DefaultGroupName=Oryn
@@ -31,8 +32,8 @@ Source: "..\dist\Oryn\*"; DestDir: "{app}"; \
     Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-Name: "{autoprograms}\Oryn"; Filename: "{app}\{#MyAppExeName}"
-Name: "{autodesktop}\Oryn"; Filename: "{app}\{#MyAppExeName}"
+Name: "{autoprograms}\Oryn"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\{#MyAppExeName}"
+Name: "{autodesktop}\Oryn"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\{#MyAppExeName}"
 
 [Run]
 Filename: "{app}\{#MyAppExeName}"; \
