@@ -60,7 +60,7 @@ class VSCodePlatformTests(unittest.TestCase):
             "Window (C:\\Users\\mukes\\Frontend\\assignment3) - Visual Studio Code\\n"
         )
 
-        with patch.object(adapter, "get_workspace_storages", return_value=[workspace]), \\
+        with patch.object(adapter, "get_workspace_storages", return_value=[workspace]), \
              patch.object(adapter, "_get_status_output", return_value=status):
             selected = adapter.find_workspace_storage()
 
