@@ -654,8 +654,6 @@ class DashboardView(QWidget):
         top_layout.setContentsMargins(30, 16, 30, 16)
         top_layout.addWidget(make_label("Workspace / Overview", muted=True))
         top_layout.addStretch(1)
-        self.api_label = make_label(self.client.base_url, "small")
-        top_layout.addWidget(self.api_label)
         self.refresh_button = QPushButton("↻  Refresh")
         self.refresh_button.clicked.connect(self.load_workspaces)
         top_layout.addWidget(self.refresh_button)
