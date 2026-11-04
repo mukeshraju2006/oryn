@@ -41,7 +41,34 @@ class VSCodePlatform:
         return self.platform_name.startswith("win")
 
     def code_executable(self):
-        names = ("code", "code.cmd") if self.is_windows else ("code",)
+        if self.is_windows:
+            # Launching .cmd files through subprocess.Popen without a shell
+            # is unreliable on Windows. Prefer the actual VS Code executable
+            # when its standard installation location is available.
+            local_app_data = self.environ.get("LOCALAPPDATA")
+            program_files = self.environ.get("PROGRAMFILES")
+            program_files_x86 = self.environ.get("PROGRAMFILES(X86)")
+            candidates = []
+            if local_app_data:
+                candidates.append(
+                    Path(local_app_data) / "Programs" / "Microsoft VS Code" / "Code.exe"
+                )
+            if program_files:
+                candidates.append(
+                    Path(program_files) / "Microsoft VS Code" / "Code.exe"
+                )
+            if program_files_x86:
+                candidates.append(
+                    Path(program_files_x86) / "Microsoft VS Code" / "Code.exe"
+                )
+
+            for candidate in candidates:
+                if candidate.is_file():
+                    return str(candidate)
+
+            names = ("code", "code.cmd")
+        else:
+            names = ("code",)
 
         for name in names:
             executable = self.which(name)
