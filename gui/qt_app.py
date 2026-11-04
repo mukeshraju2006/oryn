@@ -10,10 +10,11 @@ import sys
 import threading
 import time
 from datetime import datetime, timedelta
+from pathlib import Path
 from urllib.error import HTTPError, URLError
 
 from PySide6.QtCore import Qt, QThread, Signal, QRectF
-from PySide6.QtGui import QColor, QFont, QPainter, QPen, QBrush
+from PySide6.QtGui import QColor, QFont, QPainter, QPen, QBrush, QIcon
 from PySide6.QtWidgets import (
     QApplication, QComboBox, QFrame, QGridLayout, QHBoxLayout, QLabel,
     QLineEdit, QListWidget, QListWidgetItem, QMainWindow, QMessageBox,
@@ -1796,10 +1797,18 @@ class MainWindow(QMainWindow):
 def main():
     app = QApplication(sys.argv)
     app.setApplicationName("Oryn")
+    # Resolve the bundled icon both in source runs and PyInstaller builds.
+    resource_root = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parents[1]))
+    icon_path = resource_root / "assets" / "oryn-icon.ico"
+    if icon_path.is_file():
+        app_icon = QIcon(str(icon_path))
+        app.setWindowIcon(app_icon)
     app.setStyle("Fusion")
     app.setFont(QFont("Inter", 10))
     app.setStyleSheet(APP_STYLE)
     window = MainWindow()
+    if icon_path.is_file():
+        window.setWindowIcon(app_icon)
     window.show()
     sys.exit(app.exec())
 
