@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (
     QLineEdit, QListWidget, QListWidgetItem, QMainWindow, QMessageBox,
     QDialog, QPlainTextEdit, QPushButton, QScrollArea, QSizePolicy, QStackedWidget, QTableWidget,
     QTableWidgetItem, QVBoxLayout, QWidget, QHeaderView, QInputDialog,
-    QAbstractItemView,
+    QAbstractItemView, QProgressBar,
 )
 
 try:
@@ -88,6 +88,8 @@ QLineEdit, QComboBox {
 QLineEdit:hover, QComboBox:hover { border-color: #465873; }
 QLineEdit:focus, QComboBox:focus { border: 1px solid #9385ff; background: #10182a; }
 QComboBox QAbstractItemView { background: #141d2c; color: #eef1f8; selection-background-color: #383253; border: 1px solid #2d3a50; padding: 4px; }
+QProgressBar#operationProgress { background: #0c1320; border: 1px solid #2d3a50; border-radius: 6px; height: 12px; text-align: center; color: transparent; }
+QProgressBar#operationProgress::chunk { background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 #8875ff, stop:1 #6555dc); border-radius: 5px; }
 QTableWidget { background: #111827; alternate-background-color: #141d2c; color: #e6eaf3; border: 1px solid #253148; border-radius: 10px; gridline-color: transparent; selection-background-color: #302b55; selection-color: #ffffff; outline: 0; }
 QHeaderView::section { background: #151f30; color: #9ca9bf; border: none; border-bottom: 1px solid #2a3850; padding: 13px 10px; font-size: 10px; font-weight: 800; letter-spacing: 0.8px; }
 QTableWidget::item { padding: 9px; border-bottom: 1px solid #202c40; }
@@ -836,9 +838,24 @@ class DashboardView(QWidget):
         snapshots_layout.addWidget(table_card, 1)
         self.content_stack.addWidget(snapshots_page)
 
-        self.status_label = make_label("Ready", muted=True)
-        self.status_label.setContentsMargins(18, 6, 18, 8)
+        # CHANGED: persistent operation meter, visible for capture/restore and cloud transfers.
+        operation_panel = QWidget()
+        operation_panel.setObjectName("operationPanel")
+        operation_layout = QVBoxLayout(operation_panel)
+        operation_layout.setContentsMargins(18, 9, 18, 8)
+        operation_layout.setSpacing(5)
+        self.operation_label = make_label("Ready · no active operation", "small")
+        operation_layout.addWidget(self.operation_label)
+        self.operation_progress = QProgressBar()
+        self.operation_progress.setObjectName("operationProgress")
+        self.operation_progress.setRange(0, 100)
+        self.operation_progress.setValue(0)
+        self.operation_progress.setTextVisible(False)
+        operation_layout.addWidget(self.operation_progress)
         main_col.addWidget(self.content_stack, 1)
+        main_col.addWidget(operation_panel)
+        self.status_label = make_label("Ready", muted=True)
+        self.status_label.setContentsMargins(18, 3, 18, 7)
         main_col.addWidget(self.status_label)
         root.addWidget(main, 1)
 
@@ -910,6 +927,28 @@ class DashboardView(QWidget):
             self.activity.takeItem(self.activity.count() - 1)
         self.status_label.setText(message)
 
+    # CHANGED: map existing stage/chunk progress callbacks into a persistent UI meter.
+    def _update_operation_progress(self, message):
+        import re
+
+        message = str(message or "Working…")
+        match = re.search(r"chunk\\s+(\\d+)\\s+of\\s+(\\d+)", message, re.IGNORECASE)
+        if match:
+            current, total = int(match.group(1)), int(match.group(2))
+            if total > 0:
+                self.operation_progress.setRange(0, 100)
+                self.operation_progress.setValue(max(0, min(100, round(current * 100 / total))))
+                self.operation_label.setText(f"{message}  ·  {current}/{total} chunks")
+                return
+        # A stage without measurable completion is honestly shown as indeterminate.
+        self.operation_progress.setRange(0, 0)
+        self.operation_label.setText(message)
+
+    def _finish_operation_progress(self, message, *, failed=False):
+        self.operation_progress.setRange(0, 100)
+        self.operation_progress.setValue(0 if failed else 100)
+        self.operation_label.setText(("Failed · " if failed else "Completed · ") + str(message))
+
     def _task(self, function, success, activity, on_progress=None, cancellable=False):
         self._allow_cancel = cancellable
         self._set_busy(True)
@@ -917,6 +956,7 @@ class DashboardView(QWidget):
             self.client.last_request_metrics = None
         def done(result):
             self._set_busy(False)
+            self._finish_operation_progress(activity)
             metrics = getattr(self.client, "last_request_metrics", None)
             if metrics and metrics.get("seconds", 0) >= 1.0:
                 server = metrics.get("server_seconds")
@@ -928,6 +968,7 @@ class DashboardView(QWidget):
             success(result)
         def failed(message):
             self._set_busy(False)
+            self._finish_operation_progress(message, failed=True)
             self._log(message)
             if message.startswith("API error 401:"):
                 try:
@@ -940,11 +981,13 @@ class DashboardView(QWidget):
             show_error_dialog(self, message)
         def cancelled(message):
             self._set_busy(False)
+            self._finish_operation_progress(message, failed=True)
             self._log(message)
         self._log(activity)
+        self._update_operation_progress(activity)
         self.current_task = run_task(
             self, function, done, failed,
-            on_progress=on_progress,
+            on_progress=(on_progress or self._update_operation_progress),
             on_cancel=cancelled,
         )
         self._update_cancel_visibility()
