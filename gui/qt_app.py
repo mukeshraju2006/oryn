@@ -992,7 +992,8 @@ class DashboardView(QWidget):
                 on_progress(message)
         self.current_task = run_task(
             self, function, done, failed,
-            on_progress=report_progress,
+            # CHANGED: only pass a callback to operations that declare progress support.
+            on_progress=(report_progress if on_progress is not None else None),
             on_cancel=cancelled,
         )
         self._update_cancel_visibility()
