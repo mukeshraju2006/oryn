@@ -932,7 +932,7 @@ class DashboardView(QWidget):
         import re
 
         message = str(message or "Working…")
-        match = re.search(r"chunk\\s+(\\d+)\\s+of\\s+(\\d+)", message, re.IGNORECASE)
+        match = re.search(r"chunk\s+(\d+)\s+of\s+(\d+)", message, re.IGNORECASE)
         if match:
             current, total = int(match.group(1)), int(match.group(2))
             if total > 0:
