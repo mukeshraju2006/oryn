@@ -334,6 +334,18 @@ class VSCodeAdapter:
                 ):
                     return workspace
 
+        # Prefer VS Code's active folder from CLI status over editor filename matching.
+        status_output = self._get_status_output()
+        if status_output:
+            for line in status_output.splitlines():
+                if line.strip().startswith("Folder (") and line.strip().endswith(")"):
+                    reported = self.normalize_workspace_path(line.strip()[8:-1].strip())
+                    if reported is not None and reported.is_absolute():
+                        for workspace in workspaces:
+                            stored = self.normalize_workspace_path(workspace["workspace_path"])
+                            if self._paths_equivalent(stored, reported):
+                                return workspace
+
         if active_file:
             # CHANGED:
             # Match parsed full editor resources instead of searching the
@@ -442,33 +454,29 @@ class VSCodeAdapter:
 
         return None
 
-    # CHANGED:
-    # Read the active folder label from --status only as a basename
-    # disambiguator; workspace paths are never taken from Process Argv.
-    def _active_folder_name(self):
-        executable = self._code_executable()
+    def _get_status_output(self):
+        """Return VS Code CLI status output, or None if unavailable."""
         try:
-            # CHANGED:
-            # Explicitly decode VS Code status output as UTF-8 so malformed
-            # diagnostic bytes cannot terminate the capture operation.
             status = subprocess.run(
-                [executable, "--status"],
+                [self._code_executable(), "--status"],
                 capture_output=True,
                 text=True,
                 encoding="utf-8",
                 errors="replace",
                 timeout=3.0,
+                check=False,
             )
-        except (OSError, subprocess.TimeoutExpired):
+        except (OSError, subprocess.TimeoutExpired, VSCodeNotFoundError):
             return None
+        return status.stdout if status.returncode == 0 else None
 
-        if status.returncode != 0:
+    def _active_folder_name(self):
+        status_output = self._get_status_output()
+        if not status_output:
             return None
-
-        for line in status.stdout.splitlines():
-            match = re.search(r"Folder \(([^)]+)\)", line.strip())
-            if match:
-                return match.group(1).strip()
+        for line in status_output.splitlines():
+            if line.strip().startswith("Folder (") and line.strip().endswith(")"):
+                return line.strip()[8:-1].strip()
         return None
 
     def _workspace_basename(self, workspace_path):
