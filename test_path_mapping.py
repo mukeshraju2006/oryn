@@ -48,6 +48,24 @@ class VSCodePlatformTests(unittest.TestCase):
 
         self.assertEqual(selected["workspace_id"], "b")
 
+    def test_workspace_detection_matches_window_status_path(self):
+        adapter = VSCodeAdapter()
+        workspace = {
+            "workspace_id": "active",
+            "workspace_path": "file:///C:/Users/mukes/Frontend/assignment3",
+            "state_db": "C:/state.vscdb",
+        }
+        status = (
+            "Version: 1.90.0\\n"
+            "Window (C:\\Users\\mukes\\Frontend\\assignment3) - Visual Studio Code\\n"
+        )
+
+        with patch.object(adapter, "get_workspace_storages", return_value=[workspace]), \\
+             patch.object(adapter, "_get_status_output", return_value=status):
+            selected = adapter.find_workspace_storage()
+
+        self.assertEqual(selected["workspace_id"], "active")
+
     def test_linux_executable_lookup(self):
         platform = VSCodePlatform(
             platform_name="linux",
