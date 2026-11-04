@@ -972,6 +972,10 @@ class VSCodeAdapter:
         # of a project snapshot. Example/template environment files are
         # safe to retain because they should contain placeholders only.
         excluded_files = {
+            # Windows user registry hive; protected and not workspace content.
+            "ntuser.dat",
+            "ntuser.dat.log1",
+            "ntuser.dat.log2",
             ".netrc",
             ".npmrc",
             ".pypirc",
@@ -1189,10 +1193,14 @@ class VSCodeAdapter:
                     )
 
                 except OSError as error:
-                    # CHANGED: Never mark a partial filesystem scan as complete.
-                    raise RuntimeError(
-                        f"Could not capture workspace file {file_path}: {error}"
-                    ) from error
+                    # Protected or temporarily locked files must not abort an
+                    # otherwise useful workspace snapshot. Record the omission
+                    # explicitly so callers can distinguish it from capture.
+                    record_exclusion(
+                        relative_hint,
+                        f"file could not be read during capture: {error}",
+                    )
+                    continue
 
         if progress:
             progress(f"Project scan complete: {len(project_files)} files captured")
