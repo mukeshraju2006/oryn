@@ -693,7 +693,7 @@ class DashboardView(QWidget):
         hero_text.addWidget(make_label("Capture the state of your workspace. Restore it when you're ready to return.", muted=True))
         hero_layout.addLayout(hero_text, 1)
         self.restore_button = QPushButton("Restore selected snapshot  →")
-        self.restore_button.clicked.connect(self.restore_snapshot)
+        self.restore_button.clicked.connect(lambda checked=False: self.restore_snapshot())
         hero_layout.addWidget(self.restore_button, 0, Qt.AlignVCenter)
         page.addWidget(hero)
 
