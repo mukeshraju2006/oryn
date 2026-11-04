@@ -283,10 +283,11 @@ class VSCodeAdapter:
                     workspace_file.read_text()
                 )
 
-                workspace_path = workspace_data.get(
-                    "folder"
-                )
-
+                # Folder workspaces are stored as a file:// URI. A
+                # multi-root workspace instead stores a workspace config URI.
+                workspace_path = workspace_data.get("folder")
+                if not workspace_path:
+                    workspace_path = workspace_data.get("workspace")
                 if not workspace_path:
                     continue
 
@@ -334,17 +335,26 @@ class VSCodeAdapter:
                 ):
                     return workspace
 
-        # Prefer VS Code's active folder from CLI status over editor filename matching.
+        # VS Code --status has used both "Folder (...)" and "Window (...)".
+        # The latter is the window's workspace path, not an editor filename.
         status_output = self._get_status_output()
+        reported_paths = []
         if status_output:
             for line in status_output.splitlines():
-                if line.strip().startswith("Folder (") and line.strip().endswith(")"):
-                    reported = self.normalize_workspace_path(line.strip()[8:-1].strip())
-                    if reported is not None and reported.is_absolute():
-                        for workspace in workspaces:
-                            stored = self.normalize_workspace_path(workspace["workspace_path"])
-                            if self._paths_equivalent(stored, reported):
-                                return workspace
+                stripped = line.strip()
+                for marker in ("Folder (", "Window ("):
+                    if stripped.startswith(marker) and ")" in stripped[len(marker):]:
+                        reported = stripped[len(marker):].split(")", 1)[0].strip()
+                        parsed = self.normalize_workspace_path(reported)
+                        if parsed is not None and parsed.is_absolute():
+                            reported_paths.append(parsed)
+                        break
+
+        for reported in reported_paths:
+            for workspace in workspaces:
+                stored = self.normalize_workspace_path(workspace["workspace_path"])
+                if self._paths_equivalent(stored, reported):
+                    return workspace
 
         if active_file:
             # CHANGED:
@@ -475,8 +485,12 @@ class VSCodeAdapter:
         if not status_output:
             return None
         for line in status_output.splitlines():
-            if line.strip().startswith("Folder (") and line.strip().endswith(")"):
-                return line.strip()[8:-1].strip()
+            stripped = line.strip()
+            for marker in ("Folder (", "Window ("):
+                if stripped.startswith(marker) and ")" in stripped[len(marker):]:
+                    path = stripped[len(marker):].split(")", 1)[0].strip()
+                    parsed = self.normalize_workspace_path(path)
+                    return parsed.name if parsed is not None else None
         return None
 
     def _workspace_basename(self, workspace_path):
