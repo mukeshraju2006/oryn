@@ -462,10 +462,13 @@ python -m PyInstaller `
     --noconfirm `
     --windowed `
     --name Oryn `
-    gui\app.py
+    --icon assets\oryn-icon.ico `
+    --add-data "assets\oryn-icon.ico;assets" `
+    --add-data "assets\oryn-icon.png;assets" `
+    oryn\__main__.py
 ```
 
-Collect the Qt runtime with PyInstaller as needed for the target platform. The packaged application is generated under:
+The command above packages the Qt entry point and embeds the Oryn icon in the executable. The packaged application is generated under:
 
 ```text
 dist/Oryn/
