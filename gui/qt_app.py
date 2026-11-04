@@ -985,9 +985,14 @@ class DashboardView(QWidget):
             self._log(message)
         self._log(activity)
         self._update_operation_progress(activity)
+        def report_progress(message):
+            # Keep the existing activity log behavior while updating the meter.
+            self._update_operation_progress(message)
+            if on_progress is not None:
+                on_progress(message)
         self.current_task = run_task(
             self, function, done, failed,
-            on_progress=(on_progress or self._update_operation_progress),
+            on_progress=report_progress,
             on_cancel=cancelled,
         )
         self._update_cancel_visibility()
